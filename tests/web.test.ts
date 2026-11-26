@@ -96,6 +96,22 @@ test('API: &filter=<word> → only the skills that match, as --filter, and the c
   assert.deepEqual((await scan(FIXTURE, ' ')).body, all.body);
 });
 
+test('API: &filter=<words> → the skills with every word, in any order, as --filter', async () => {
+  const all = await scan(FIXTURE);
+  const words = await scan(FIXTURE, ' module  billing ');
+  assert.equal(words.status, 200);
+  assert.deepEqual(words.body.skills.map((skill: { name: string }) => skill.name), ['invoices']);
+  assert.equal(words.body.total, 4);
+  assert.deepEqual(words.body.warnings, all.body.warnings);
+  // Every word: commits has "commit", but not "kotlin".
+  const and = await scan(FIXTURE, 'commit kotlin');
+  assert.deepEqual(and.body.skills.map((skill: { name: string }) => skill.name), ['code-style']);
+  const none = await scan(FIXTURE, 'commit zzz');
+  assert.deepEqual({ status: none.status, skills: none.body.skills, total: none.body.total }, { status: 200, skills: [], total: 4 });
+  // Blank, with tabs and new lines: no filter.
+  assert.deepEqual((await scan(FIXTURE, ' \t\n ')).body, all.body);
+});
+
 test('API: no link, or a scan that fails → 400 and its message', async () => {
   assert.deepEqual(await scan(''), { status: 400, body: { error: 'Enter a GitHub URL or a directory' } });
   assert.deepEqual(await scan('/no/such/directory'), {
@@ -347,7 +363,10 @@ test('page: the filter matches what --filter does, word by word', { timeout: 5_0
   const view = await page('/');
   try {
     await view.enter(FIXTURE);
-    for (const word of ['commit', 'KOTLIN', 'Billing Module', 'release', 'e', "project's", 'zzz']) {
+    for (const word of [
+      'commit', 'KOTLIN', 'Billing Module', 'release', 'e', "project's", 'zzz',
+      'module billing', 'kotlin STYLE', 'commit kotlin', 'commit zzz', ' \tcode   style ', '"billing module"', ' \t ',
+    ]) {
       view.filter(word);
       const { body } = await scan(FIXTURE, word);
       assert.deepEqual(view.names(), body.skills.map((skill: { name: string }) => skill.name), word);
@@ -433,6 +452,80 @@ test('page: the URL keeps the filter; reload shows the same', { timeout: 5_000 }
   try {
     await none.settled(1);
     assert.equal(none.$('no-match').textContent, 'no skills match "zzz"');
+  } finally {
+    none.close();
+  }
+});
+
+test('page: several words narrow as you type, without scanning again; the header counts both', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    view.filter('commit');
+    assert.deepEqual(view.names(), ['code-style', 'commits']);
+    // Typing the second word narrows it: every word, not any.
+    view.filter('commit ');
+    assert.deepEqual(view.names(), ['code-style', 'commits']);
+    view.filter('commit k');
+    assert.deepEqual(view.names(), ['code-style']);
+    view.filter('commit kotlin');
+    assert.deepEqual(view.names(), ['code-style']);
+    assert.equal(view.$('summary').textContent, 'fixture · 1 of 4 skills');
+    // In any order, whatever the whitespace; one word in the name, the other in the description.
+    view.filter('  module\tbilling ');
+    assert.deepEqual(view.names(), ['invoices']);
+    view.filter('kotlin STYLE');
+    assert.deepEqual(view.names(), ['code-style']);
+    assert.equal(view.$('no-match').textContent, '');
+    // The one scan above, and no other.
+    assert.equal(view.scans(), 1);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: several words with no match → no skills and the words in the message, not an error', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    view.filter('  commit \t zzz ');
+    assert.deepEqual(view.items(), []);
+    assert.equal(view.$('no-match').textContent, 'no skills match "commit zzz"');
+    assert.equal(view.$('summary').textContent, 'fixture · 0 of 4 skills');
+    assert.equal(view.$('error').textContent, '');
+    assert.equal(view.$('main').hidden, false);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: the URL keeps the words; reload shows the same', { timeout: 5_000 }, async () => {
+  const first = await page('/');
+  let href: string;
+  try {
+    await first.enter(FIXTURE);
+    first.filter(' commit   kotlin ');
+    const path = first.items()[0].dataset.path!;
+    assert.deepEqual(first.search(), { repo: FIXTURE, skill: path, filter: 'commit kotlin' });
+    href = first.dom.window.location.href;
+    assert.match(href, /\?repo=[^&]+&skill=[^&]+&filter=commit\+kotlin$/);
+  } finally {
+    first.close();
+  }
+  const reloaded = await page(new URL(href).pathname + new URL(href).search);
+  try {
+    await reloaded.settled(1);
+    assert.equal((reloaded.$('filter') as HTMLInputElement).value, 'commit kotlin');
+    assert.deepEqual(reloaded.names(), ['code-style']);
+    assert.equal(reloaded.$('summary').textContent, 'fixture · 1 of 4 skills');
+    assert.equal(reloaded.$('skill').querySelector('h2')!.textContent, 'code-style');
+  } finally {
+    reloaded.close();
+  }
+  const none = await page(`/?repo=${encodeURIComponent(FIXTURE)}&filter=${encodeURIComponent('commit zzz')}`);
+  try {
+    await none.settled(1);
+    assert.equal(none.$('no-match').textContent, 'no skills match "commit zzz"');
   } finally {
     none.close();
   }

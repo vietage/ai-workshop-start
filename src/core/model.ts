@@ -39,14 +39,21 @@ export function sortSkills(skills: Skill[]): Skill[] {
   return [...skills].sort((a, b) => compare(a.name, b.name) || compare(a.path, b.path));
 }
 
+/** The filter's words: its text split on whitespace; none for an empty or a blank one. */
+export function filterWords(filter?: string): string[] {
+  return filter?.split(/\s+/).filter(Boolean) ?? [];
+}
+
 /**
- * The skills whose name or description contains the word, in any case; all of them without one.
- * The web page's script does the same; tests/web.test.ts checks that they agree.
+ * The skills whose name or description contains every word of the filter, each in any case and
+ * in any order; all of them without a word. The web page's script does the same;
+ * tests/web.test.ts checks that they agree.
  */
-export function filterSkills(skills: Skill[], word?: string): Skill[] {
-  if (word === undefined) return skills;
-  const needle = word.toLowerCase();
-  return skills.filter((skill) => [skill.name, skill.description].some((text) => text.toLowerCase().includes(needle)));
+export function filterSkills(skills: Skill[], filter?: string): Skill[] {
+  const needles = filterWords(filter).map((word) => word.toLowerCase());
+  if (needles.length === 0) return skills;
+  const texts = (skill: Skill) => [skill.name, skill.description].map((text) => text.toLowerCase());
+  return skills.filter((skill) => needles.every((needle) => texts(skill).some((text) => text.includes(needle))));
 }
 
 /** The description's first sentence, on one line. */

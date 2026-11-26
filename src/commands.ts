@@ -1,7 +1,7 @@
 // The skill-atlas commands. The same code serves the Node CLI and the browser
 // terminal: everything that differs between them comes in through the context.
 import { AtlasError } from './core/errors.ts';
-import { firstSentence, skillLink, type Repository, type Skill } from './core/model.ts';
+import { filterWords, firstSentence, skillLink, type Repository, type Skill } from './core/model.ts';
 import { scan, type Source } from './core/scan.ts';
 
 export type Context = {
@@ -17,7 +17,7 @@ export type Context = {
 const usage = `Usage: skill-atlas <command>
 
   scan <GitHub URL | directory>   find every SKILL.md in a repository and print it
-    --filter <word>               only the skills whose name or description contains the word
+    --filter <words>              only the skills whose name or description contains every word
   serve [--port <port>]           open a local web view, at http://localhost:4173 by default
   help                            show this help`;
 
@@ -37,15 +37,16 @@ export async function run(args: string[], context: Context): Promise<number> {
   }
 }
 
-const scanUsage = 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <word>]';
+const scanUsage = 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <words>]';
 
 async function scanCommand(args: string[], context: Context) {
   const inputs: string[] = [];
   let filter: string | undefined;
   for (let index = 0; index < args.length; index++) {
     if (args[index] !== '--filter') inputs.push(args[index]);
-    // One word, right after the flag: not missing, not empty, not the flag again; trimmed, as in the web view.
-    else if (filter === undefined && args[index + 1]?.trim() && args[index + 1] !== '--filter') filter = args[++index].trim();
+    // One argument, right after the flag: not missing, not blank, not the flag again; its words,
+    // split on whitespace, as in the web view.
+    else if (filter === undefined && args[index + 1]?.trim() && args[index + 1] !== '--filter') filter = filterWords(args[++index]).join(' ');
     else throw new AtlasError(scanUsage);
   }
   if (inputs.length !== 1) throw new AtlasError(scanUsage);
@@ -65,7 +66,7 @@ async function serveCommand(args: string[], context: Context) {
 
 /**
  * `<owner>/<repo> · N skills`, or `· N of M skills` when filtered, then each skill's name, first
- * sentence and link; `no skills match "<word>"` when the filter leaves none.
+ * sentence and link; `no skills match "<words>"` when the filter leaves none.
  */
 function printRepository(
   repository: Repository,

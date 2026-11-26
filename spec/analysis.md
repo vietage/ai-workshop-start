@@ -5,8 +5,12 @@ A **GitHub repository** URL, or a local directory
 - `github.com/<owner>/<repo>/tree/<commit or branch>`: that commit
 ## Output
 Every *project skill*: **name**, **description**, **link**
-- A **filter word**, optional: only the skills whose name or description contains it, a
-  *substring*, *case-insensitive*; the count before filtering is kept. Applied after the scan
+- A **filter**, optional: its text split on *whitespace* into words; only the skills whose name or
+  description contains **every** word (*AND*), each a *substring*, *case-insensitive*, in *any
+  order*, each word in the name or in the description; the count before filtering is kept.
+  Applied after the scan
+  - Quotes are characters like any other: `"code review"` is the words `"code` and `review"`
+  - No words (empty, or only whitespace) → no filter
 ## Project skill
 A skill that agents load when they work in the repository:
 `<project>/<agent folder>/<skill>/SKILL.md`

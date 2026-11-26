@@ -73,17 +73,18 @@ let result;
 let scanned;
 let selected;
 
-// The same rule as filterSkills in src/core/model.ts: the name or the description contains the
-// word, in any case.
-const matches = (skill, word) =>
-  [skill.name, skill.description].some((text) => text.toLowerCase().includes(word.toLowerCase()));
-const filterWord = () => $('filter').value.trim();
+// The same rule as filterSkills in src/core/model.ts: the name or the description contains every
+// word, each in any case, in any order.
+const matches = (skill, words) =>
+  words.every((word) => [skill.name, skill.description].some((text) => text.toLowerCase().includes(word.toLowerCase())));
+// The filter's words, split on whitespace, joined by one space: '' without a word.
+const filterWords = () => $('filter').value.split(/\\s+/).filter(Boolean).join(' ');
 
 function setUrl(repo, skill) {
   const params = new URLSearchParams();
   if (repo) params.set('repo', repo);
   if (skill) params.set('skill', skill);
-  if (filterWord()) params.set('filter', filterWord());
+  if (filterWords()) params.set('filter', filterWords());
   const query = params.toString();
   history.replaceState(null, '', query ? '?' + query : location.pathname);
 }
@@ -115,13 +116,13 @@ async function scan(repo, skill) {
 /** The repository, and its skills that match the filter; the skill at \`path\` selected if shown. */
 function show(path) {
   const { repository, skills: all, warnings } = result;
-  const word = filterWord();
-  const skills = word ? all.filter((skill) => matches(skill, word)) : all;
+  const words = filterWords();
+  const skills = words ? all.filter((skill) => matches(skill, words.split(' '))) : all;
   $('main').hidden = false;
   const summary = $('summary');
   summary.replaceChildren(
     element('strong', '', repository.id),
-    ' · ' + (word ? skills.length + ' of ' : '') + all.length + (all.length === 1 ? ' skill' : ' skills'),
+    ' · ' + (words ? skills.length + ' of ' : '') + all.length + (all.length === 1 ? ' skill' : ' skills'),
     repository.commit ? ' · ' + repository.commit.slice(0, 12) : '',
   );
   $('skills').replaceChildren(...skills.map((skill) => {
@@ -135,7 +136,7 @@ function show(path) {
     item.addEventListener('click', () => select(skill.path));
     return item;
   }));
-  $('no-match').textContent = word && !skills.length ? 'no skills match "' + word + '"' : '';
+  $('no-match').textContent = words && !skills.length ? 'no skills match "' + words + '"' : '';
   $('warnings').replaceChildren(...warnings.map((warning) => element('li', '', warning)));
   const initial = skills.find((skill) => skill.path === path) ?? skills[0];
   select(initial?.path);
