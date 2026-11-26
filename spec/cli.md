@@ -34,6 +34,11 @@ intellij-community — 41 skills
 ```
 - `<org> · N repositories · M skills`, as GitHub spells the name; then `<repo> — N skills`, in the
   order of `spec/analysis.md`; one that failed: `<repo> — not scanned`
+- While it scans, a **progress bar** on *stderr*, when it is a *terminal*:
+  `[########------------] 12/30 repositories`, 20 characters filled in proportion; redrawn on one
+  line as each repository is done; *erased* when the scan ends, before the result, also on an error
+  - stderr not a terminal (piped, a file, the tests' stored output) → no progress bar; the output
+    is the same either way
 - Warnings go to *stderr*, `warning: <repo>: …`; exit code 0
 - With `--filter` → `--filter works on one repository, not on an organisation`, exit code 1
 - Unknown organisation → its message, exit code 1

@@ -17,6 +17,9 @@
 - An **organisation** link, `github.com/<org>`: above the skills, `<org> · N repositories · M skills`,
   its **repositories** with their counts (`N skills`, or `not scanned`), in the CLI's order, and its
   warnings; no skills until one is selected
+  - While it scans: a **progress bar** under the field, `N of M repositories scanned`, as each
+    repository is done; *hidden* once the scan ends, also when it fails; another link entered →
+    the earlier scan's progress is not shown
   - A repository selected → its skills as for its link, at the commit counted; the filter as today
   - An empty repository selected → no skills, `No skills in this repository.`, no error; not
     scanned again
@@ -37,3 +40,8 @@ and `content`, the SKILL.md text), `total` (the count before the filter), `warni
 - An organisation → JSON: `organisation` (`name`, `url`), `repositories` (each with `name`, `url`,
   `commit`, `skillCount`; `null` for one that failed), `skills` (their sum), `warnings`
   - With `filter` → status 400; unknown organisation → status 400
+- `stream=1`: `application/x-ndjson`, one JSON object a line: `{ "progress": { "scanned", "total" } }`
+  as an organisation's repositories are done (0 of N first), then `{ "result": <the JSON above> }`;
+  one repository: only the `result`
+  - A scan that fails *before* any line → status 400, `{ "error": <message> }`, as without it;
+    *after* → status 200, its last line `{ "error": <message> }`

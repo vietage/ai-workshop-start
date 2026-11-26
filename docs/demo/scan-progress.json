@@ -1,0 +1,18 @@
+{
+  "serve": true,
+  "steps": [
+    { "goto": "/", "pause": 800 },
+    { "caption": "Scan all repositories of an organisation" },
+    { "type": "#repo", "text": "github.com/Kotlin", "pause": 400 },
+    { "click": "#scan", "pause": 3500 },
+    { "caption": "A progress bar: repositories scanned of the total", "pause": 3500 },
+    { "caption": "It fills as each repository is done, the failed ones too", "pause": 2500 },
+    { "waitFor": "#org-summary strong", "timeout": 120000 },
+    { "caption": "Done: the bar is hidden, the repositories and their counts shown", "pause": 3000 },
+    { "caption": "An unknown organisation: its message, no progress bar" },
+    { "fill": "#repo" },
+    { "type": "#repo", "text": "github.com/no-such-organisation-xyz", "pause": 300 },
+    { "click": "#scan" },
+    { "waitFor": "#error:not(:empty)", "pause": 2500 }
+  ]
+}

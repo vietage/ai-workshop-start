@@ -16,6 +16,9 @@ export const PAGE = `<!doctype html>
   input { flex: 1; padding: 8px 10px; font: inherit; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: inherit; }
   button { padding: 8px 16px; font: inherit; border: 0; border-radius: 6px; background: var(--accent); color: white; cursor: pointer; }
   button:disabled { opacity: .6; cursor: default; }
+  #progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+  #progress[hidden] { display: none; }
+  #progress-bar { flex: 1; max-width: 420px; height: 8px; accent-color: var(--accent); }
   main { display: grid; grid-template-columns: minmax(260px, 380px) 1fr; min-height: calc(100vh - 100px); }
   #list { border-right: 1px solid var(--border); overflow: auto; }
   #summary { padding: 12px 16px; color: var(--muted); }
@@ -58,6 +61,10 @@ export const PAGE = `<!doctype html>
     <input id="repo" name="repo" placeholder="https://github.com/owner/repo, …/tree/<commit>, https://github.com/organisation, or a local directory" autocomplete="off" required>
     <button id="scan" type="submit">Scan</button>
   </form>
+  <div id="progress" hidden>
+    <progress id="progress-bar" aria-label="Repositories scanned" value="0" max="1"></progress>
+    <span id="progress-text"></span>
+  </div>
 </header>
 <section id="organisation" hidden>
   <div id="org-summary"></div>
@@ -90,6 +97,8 @@ let selected;
 // The organisation shown, when the link is one, and the name of its selected repository.
 let organisation;
 let repository;
+// The latest scan of a link entered: only its progress is shown.
+let scanning;
 // Scans under way: the Scan button waits for all of them.
 let pending = 0;
 const plural = (count, one, many) => count + ' ' + (count === 1 ? one : many);
@@ -119,6 +128,40 @@ async function request(link) {
   return body;
 }
 
+/**
+ * The same, streamed: \`progress(scanned, total)\` as an organisation's repositories are done, then
+ * the answer; one JSON object a line.
+ */
+async function requestWithProgress(link, progress) {
+  const response = await fetch('/api/scan?stream=1&repo=' + encodeURIComponent(link));
+  if (!response.ok) throw new Error((await response.json()).error);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    buffered += done ? decoder.decode() : decoder.decode(value, { stream: true });
+    const lines = buffered.split('\\n');
+    buffered = done ? '' : lines.pop();
+    for (const line of lines.filter(Boolean)) {
+      const body = JSON.parse(line);
+      if (body.error !== undefined) throw new Error(body.error);
+      if (body.result) return body.result;
+      progress(body.progress.scanned, body.progress.total);
+    }
+    if (done) throw new Error('The scan ended without an answer');
+  }
+}
+
+/** The progress bar: \`N of M repositories scanned\`; hidden without a total. */
+function showProgress(scanned, total) {
+  $('progress').hidden = total === undefined;
+  if (total === undefined) return;
+  $('progress-bar').max = Math.max(total, 1);
+  $('progress-bar').value = total === 0 ? 1 : scanned;
+  $('progress-text').textContent = scanned + ' of ' + plural(total, 'repository', 'repositories') + ' scanned';
+}
+
 /** Runs a scan with the Scan button disabled until every scan under way is done. */
 async function busy(work) {
   pending++;
@@ -136,15 +179,21 @@ async function busy(work) {
 
 /** A link entered: a repository, or an organisation and, if \`name\` is one of them, that repository. */
 function scan(repo, skill, name) {
+  // This scan, to tell it from a later one of the same link.
+  const current = {};
   return busy(async () => {
     $('error').textContent = '';
     scanned = repo;
+    scanning = current;
     organisation = undefined;
     repository = undefined;
+    showProgress();
     try {
       // The whole repository: the filter narrows it here, as you type, without scanning again.
-      const body = await request(repo);
-      if (scanned !== repo) return;
+      // An organisation: the progress bar while its repositories are scanned.
+      const body = await requestWithProgress(repo, (done, total) => scanning === current && showProgress(done, total));
+      if (scanning !== current) return;
+      showProgress();
       if (body.organisation) {
         organisation = body;
         result = undefined;
@@ -158,7 +207,9 @@ function scan(repo, skill, name) {
       result = body;
       show(skill);
     } catch (error) {
-      if (scanned === repo) failed(error);
+      if (scanning !== current) return;
+      showProgress();
+      failed(error);
     }
   });
 }

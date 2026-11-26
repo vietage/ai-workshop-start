@@ -18,7 +18,8 @@ and any order: `./skill-atlas scan https://github.com/JetBrains/kotlin --filter 
 header shows `N of M skills`. The web view's filter field works the same way.
 
 An organisation, or a user: `./skill-atlas scan github.com/JetBrains` lists its repositories, each
-with its skill count, the most first; archived repositories and forks are skipped.
+with its skill count, the most first; archived repositories and forks are skipped. While it scans, a
+progress bar shows how many repositories are done, in the terminal and in the web view.
 
 Or in a browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
 for the repository or organisation link, its skills (with a field to filter them) and each one's SKILL.md

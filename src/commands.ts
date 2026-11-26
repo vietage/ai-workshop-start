@@ -3,17 +3,22 @@
 import { AtlasError } from './core/errors.ts';
 import { filterWords, firstSentence, skillLink, type Repository, type Skill } from './core/model.ts';
 import { parseGitHubOwner } from './core/github.ts';
-import type { OrganisationResult } from './core/organisation.ts';
+import type { OrganisationResult, Progress } from './core/organisation.ts';
 import { scan, type Source } from './core/scan.ts';
 
 export type Context = {
   /** Opens what the user asked to scan. */
   open(input: string): Promise<Source>;
-  /** Scans every repository of a GitHub organisation, or of a user. */
-  scanOrganisation(input: string): Promise<OrganisationResult>;
+  /** Scans every repository of a GitHub organisation, or of a user; `progress` as each one is done. */
+  scanOrganisation(input: string, progress?: Progress): Promise<OrganisationResult>;
   print(text: string): void;
   /** Errors and warnings. */
   error(text: string): void;
+  /**
+   * The progress of an organisation's scan, while it runs: `show` each time a repository is done,
+   * `hide` once the scan ends, also on an error. Missing where it is not shown (stderr not a terminal).
+   */
+  progress?: { show(line: string): void; hide(): void };
   /** Starts the local web view; resolves once it listens. Missing where there is none (the browser). */
   serve?(port: number): Promise<void>;
 };
@@ -57,11 +62,27 @@ async function scanCommand(args: string[], context: Context) {
   if (inputs.length !== 1) throw new AtlasError(scanUsage);
   if (parseGitHubOwner(inputs[0])) {
     if (filter !== undefined) throw new AtlasError('--filter works on one repository, not on an organisation');
-    return printOrganisation(await context.scanOrganisation(inputs[0]), context);
+    return printOrganisation(await scanWithProgress(inputs[0], context), context);
   }
   const result = await scan(await context.open(inputs[0]), { filter });
   printRepository(result.repository, result.skills, filter === undefined ? undefined : { filter, total: result.total }, context);
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
+}
+
+/** The organisation's scan, with a progress bar while it runs; hidden once it ends, whatever the outcome. */
+async function scanWithProgress(input: string, { scanOrganisation, progress }: Context): Promise<OrganisationResult> {
+  if (!progress) return scanOrganisation(input);
+  try {
+    return await scanOrganisation(input, (scanned, total) => progress.show(progressBar(scanned, total)));
+  } finally {
+    progress.hide();
+  }
+}
+
+/** `[########------------] 12/30 repositories`: the bar is `width` characters, filled in proportion. */
+export function progressBar(scanned: number, total: number, width = 20): string {
+  const filled = total === 0 ? width : Math.floor((scanned / total) * width);
+  return `[${'#'.repeat(filled)}${'-'.repeat(width - filled)}] ${scanned}/${total} ${total === 1 ? 'repository' : 'repositories'}`;
 }
 
 async function serveCommand(args: string[], context: Context) {
