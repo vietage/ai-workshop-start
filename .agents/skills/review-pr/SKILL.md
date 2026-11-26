@@ -154,5 +154,8 @@ gh api "repos/$repo/statuses/$head" -f context=air-chain/review -f state=failure
   -f description="Verdict: need changes" -f target_url="<review url>"
 ```
 
+If GitHub refuses the status with `403` (the token has no `statuses: write`), the review's
+`Verdict:` line still carries the verdict: say so when you finish, and don't retry.
+
 The description may add a short tail after the verdict, such as `Verdict: need changes — 2 bug,
 1 test`, within 140 characters. Finish by printing the PR URL and the verdict.

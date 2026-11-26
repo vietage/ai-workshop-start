@@ -55,6 +55,13 @@ gh api "repos/$repo/commits/<sha>/statuses" --jq '[.[] | select(.context == "air
   `<!-- air-chain note -->`: the agents may post as the same GitHub account as a person, so the
   marker, not the login, says which replies are an agent's. They trigger nothing.
 
+**When statuses can't be set.** If setting a status fails with `403 Resource not accessible by
+integration` (the token has no `statuses: write`), the agents go on without it: the review's
+`Verdict:` line carries the verdict, and address-review re-reviews and merges in its own run, so
+the PR still reaches a merge. Only the claim against parallel runs and a required
+`air-chain/review` check are lost; say so in the run's summary so a person can grant the
+permission.
+
 ## Wiring
 
 Air's GitHub triggers don't fire on commit statuses, so

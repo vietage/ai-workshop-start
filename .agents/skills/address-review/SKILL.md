@@ -20,6 +20,11 @@ of the run: the fixed commit is re-reviewed (step 7), and an approve is merged (
 same run. Don't end with "Ready for review" and rely on another automation to come back: the
 statuses may not be forwarded, and a reviewer automation may not set them.
 
+If setting a status fails with `403` (no `statuses: write`), don't stop: go on without it, and
+read verdicts from the review's `Verdict:` line (step 1, case 2). For `Needs a person`, post the
+reason as a PR comment ending with `<!-- air-chain note -->` instead. Mention the missing
+permission when you finish.
+
 Every reply you post in a review thread ends with `<!-- air-chain note -->`. You may post as the
 same GitHub account as a person, so the marker is what tells your replies apart.
 
