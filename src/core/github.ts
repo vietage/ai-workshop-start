@@ -1,4 +1,4 @@
-import { AtlasError } from './errors.ts';
+import { AtlasError, EmptyRepository } from './errors.ts';
 import { SKILL_ROOTS } from './find.ts';
 import type { Source } from './scan.ts';
 
@@ -33,16 +33,29 @@ export async function openGitHub(input: string, options: GitHubOptions): Promise
     `${API}/repos/${name.owner}/${name.repo}`,
     `Repository not found: https://github.com/${name.owner}/${name.repo}`,
   );
-  const id = info.full_name;
-  const ref = name.ref ?? info.default_branch;
-  const { sha } = await github.json<{ sha: string }>(
-    `${API}/repos/${id}/commits/${encodePath(ref)}`,
-    `Not found in https://github.com/${id}: ${ref}`,
-  );
-  const warnings: string[] = [];
   // Code search sees only the default branch, so a pinned ref is always listed through its tree.
-  const search = options.token && !name.ref;
-  const paths = search ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings, !name.ref);
+  // Without a ref, a token searches everywhere: a truncated tree's warning says so.
+  const search = Boolean(options.token && !name.ref);
+  return openAt(github, info.full_name, name.ref ?? info.default_branch, { search, searchable: !name.ref });
+}
+
+/**
+ * A repository of an organisation, on its default branch: always through its tree. Code search
+ * allows only a few requests a minute, too few for every repository of an organisation.
+ */
+export function openListed(repository: ListedRepository, options: GitHubOptions): Promise<Source> {
+  return openAt(client(options), repository.id, repository.defaultBranch, { search: false, searchable: false });
+}
+
+/** The ref's commit, and its files: through code search, or through the tree. */
+async function openAt(github: Client, id: string, ref: string, how: { search: boolean; searchable: boolean }): Promise<Source> {
+  const { sha } = await github
+    .json<{ sha: string }>(`${API}/repos/${id}/commits/${encodePath(ref)}`, `Not found in https://github.com/${id}: ${ref}`)
+    .catch((error: unknown) => {
+      throw error instanceof EmptyRepository ? new EmptyRepository(`Repository is empty: https://github.com/${id}`) : error;
+    });
+  const warnings: string[] = [];
+  const paths = how.search ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings, how.searchable);
   const [organization, repo] = id.split('/');
   return {
     repository: { id, organization, name: repo, url: `https://github.com/${id}`, commit: sha },
@@ -50,6 +63,50 @@ export async function openGitHub(input: string, options: GitHubOptions): Promise
     warnings,
     read: (path) => github.raw(`${RAW}/${id}/${sha}/${encodePath(path)}`),
   };
+}
+
+/** `https://github.com/<owner>`, with or without the scheme or a trailing slash: an organisation or a user. */
+export function parseGitHubOwner(input: string): { owner: string } | undefined {
+  const match = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/?$/i.exec(input.trim());
+  return match ? { owner: match[1] } : undefined;
+}
+
+/** A repository as an organisation's list has it. */
+export type ListedRepository = { id: string; name: string; defaultBranch: string };
+
+export type Owner = {
+  /** The organisation's or user's name as GitHub spells it. */
+  name: string;
+  url: string;
+  /** Without the archived repositories and the forks. */
+  repositories: ListedRepository[];
+};
+
+type RepositoryInfo = { name: string; full_name: string; default_branch: string; archived: boolean; fork: boolean };
+
+/**
+ * Every repository of an organisation, or of a user, 100 a page, without the archived ones and
+ * the forks; with a token, the private ones it can see too.
+ */
+export async function listRepositories(input: string, options: GitHubOptions): Promise<Owner> {
+  const parsed = parseGitHubOwner(input);
+  if (!parsed) throw new AtlasError(`Not a GitHub organisation URL: ${input}`);
+  const github = client(options);
+  const owner = await github.json<{ login: string; type: string }>(
+    `${API}/users/${parsed.owner}`,
+    `Organisation not found: https://github.com/${parsed.owner}`,
+  );
+  const kind = owner.type === 'Organization' ? 'orgs' : 'users';
+  const repositories: ListedRepository[] = [];
+  for (let page = 1; ; page++) {
+    const listed = await github.json<RepositoryInfo[]>(`${API}/${kind}/${owner.login}/repos?per_page=100&page=${page}`);
+    for (const repository of listed) {
+      if (repository.archived || repository.fork) continue;
+      repositories.push({ id: repository.full_name, name: repository.name, defaultBranch: repository.default_branch });
+    }
+    if (listed.length < 100) break;
+  }
+  return { name: owner.login, url: `https://github.com/${owner.login}`, repositories };
 }
 
 /** Code search looks at the whole default branch, 100 results a page. */
@@ -118,7 +175,7 @@ function client({ fetch, token }: GitHubOptions) {
 
   async function request(url: string, notFound: string): Promise<unknown> {
     const response = await get(url, { headers });
-    if (response.ok) return response.json();
+    if (response.ok) return readBody(response, url, () => response.json());
     const body: unknown = await response.json().catch(() => undefined);
     const message = (body as { message?: unknown } | undefined)?.message;
     const text = typeof message === 'string' ? message : '';
@@ -126,6 +183,8 @@ function client({ fetch, token }: GitHubOptions) {
     if ((response.status === 403 || response.status === 429) && /rate limit/i.test(text)) {
       throw new AtlasError(`GitHub rate limit reached; ${token ? 'try again in a minute' : 'set GITHUB_TOKEN'}`);
     }
+    // What GitHub answers for the commits of a repository that has none.
+    if (response.status === 409 && /empty/i.test(text)) throw new EmptyRepository(`Repository is empty: ${url}`);
     if (response.status === 401) throw new AtlasError('GitHub rejected the token in GITHUB_TOKEN');
     throw new AtlasError(`GitHub answered ${response.status} for ${url}${text && `: ${text}`}`);
   }
@@ -141,9 +200,19 @@ function client({ fetch, token }: GitHubOptions) {
       const response = await get(url);
       if (response.status === 404) return undefined;
       if (!response.ok) throw new AtlasError(`GitHub answered ${response.status} for ${url}`);
-      return new Uint8Array(await response.arrayBuffer());
+      return new Uint8Array(await readBody(response, url, () => response.arrayBuffer()));
     },
   };
+}
+
+/** A response's body; an answer cut off, or one that is not JSON (a proxy's error page), as a clear message. */
+async function readBody<T>(response: Response, url: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new AtlasError(`GitHub answered ${response.status} for ${url}, but not with JSON`);
+    throw new AtlasError(`Cannot read GitHub's answer for ${url}: ${describe(error)}`);
+  }
 }
 
 function encodePath(path: string): string {

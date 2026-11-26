@@ -2,11 +2,15 @@
 // terminal: everything that differs between them comes in through the context.
 import { AtlasError } from './core/errors.ts';
 import { filterWords, firstSentence, skillLink, type Repository, type Skill } from './core/model.ts';
+import { parseGitHubOwner } from './core/github.ts';
+import type { OrganisationResult } from './core/organisation.ts';
 import { scan, type Source } from './core/scan.ts';
 
 export type Context = {
   /** Opens what the user asked to scan. */
   open(input: string): Promise<Source>;
+  /** Scans every repository of a GitHub organisation, or of a user. */
+  scanOrganisation(input: string): Promise<OrganisationResult>;
   print(text: string): void;
   /** Errors and warnings. */
   error(text: string): void;
@@ -18,6 +22,7 @@ const usage = `Usage: skill-atlas <command>
 
   scan <GitHub URL | directory>   find every SKILL.md in a repository and print it
     --filter <words>              only the skills whose name or description contains every word
+  scan github.com/<organisation>  list its repositories, each with its skill count
   serve [--port <port>]           open a local web view, at http://localhost:4173 by default
   help                            show this help`;
 
@@ -50,6 +55,10 @@ async function scanCommand(args: string[], context: Context) {
     else throw new AtlasError(scanUsage);
   }
   if (inputs.length !== 1) throw new AtlasError(scanUsage);
+  if (parseGitHubOwner(inputs[0])) {
+    if (filter !== undefined) throw new AtlasError('--filter works on one repository, not on an organisation');
+    return printOrganisation(await context.scanOrganisation(inputs[0]), context);
+  }
   const result = await scan(await context.open(inputs[0]), { filter });
   printRepository(result.repository, result.skills, filter === undefined ? undefined : { filter, total: result.total }, context);
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
@@ -83,4 +92,22 @@ function printRepository(
     print(`  ${skillLink(repository, skill)}`);
     if (skill.copies.length > 0) print(`  also in ${skill.copies.join(', ')}`);
   }
+}
+
+/**
+ * `<organisation> · N repositories · M skills`, then each repository with its skill count;
+ * `not scanned` for the ones that failed. Warnings go to stderr.
+ */
+function printOrganisation(result: OrganisationResult, { print, error }: Context) {
+  const repositories = result.repositories.length;
+  print(`${result.organisation.name} · ${plural(repositories, 'repository', 'repositories')} · ${plural(result.skills, 'skill', 'skills')}`);
+  for (const repository of result.repositories) {
+    const count = repository.skillCount === undefined ? 'not scanned' : plural(repository.skillCount, 'skill', 'skills');
+    print(`${repository.name} — ${count}`);
+  }
+  for (const warning of result.warnings) error(`warning: ${warning}`);
+}
+
+function plural(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
 }
