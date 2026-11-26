@@ -18,8 +18,26 @@ export type OrganisationResult = {
   repositories: OrganisationRepository[];
   /** The skills of every repository counted. */
   skills: number;
-  /** Each one starts with its repository's name. */
+  /** Each one starts with its repository's name; the cache's own, last, with `cache: `. */
   warnings: string[];
+};
+
+/** What scanning one repository gave, at a commit: what the cache keeps of it. */
+export type CachedRepository = { commit: string; skillCount: number; warnings: string[] };
+
+/**
+ * The repositories already scanned, kept between scans: `src/cache.ts` keeps them in a SQLite
+ * file. It never throws: what goes wrong is a warning, and the scan goes on without it.
+ */
+export type RepositoryCache = {
+  /** What is kept of the repository, `<owner>/<repo>`, if anything. */
+  get(id: string): CachedRepository | undefined;
+  /** Keeps it, in place of what was kept of the repository. */
+  set(id: string, entry: CachedRepository): void;
+  /** Forgets the owner's repositories that are not among `ids`: deleted, archived, moved, now a fork. */
+  prune(owner: string, ids: string[]): void;
+  /** Ends its use; what went wrong with it, if anything, each a warning. */
+  close(): string[];
 };
 
 /** How far a scan of an organisation has gone: `scanned` of its `total` repositories. */
@@ -30,42 +48,77 @@ export type OrganisationOptions = GitHubOptions & {
   concurrency?: number;
   /** Called with 0 once the repositories are listed, then each time one is done, whatever its outcome. */
   progress?: Progress;
+  /**
+   * Opens the cache of the repositories already scanned; called once the repositories are listed.
+   * Without it, nothing is kept and every repository is scanned.
+   */
+  cache?: () => Promise<RepositoryCache>;
+  /** Scans every repository again, whatever the cache has, and keeps the new results. */
+  refresh?: boolean;
 };
 
 /**
  * Every repository of an organisation, or of a user, without the archived ones and the forks,
  * each scanned on its default branch by the same rules as one repository. A repository that fails,
  * whatever the error, is a warning, and the scan goes on.
+ *
+ * With a cache, a repository whose default branch is still at the commit it was scanned at is not
+ * scanned again: its count and warnings come from the cache, after the one request for its commit.
+ * The result is the same either way.
  */
 export async function scanOrganisation(input: string, options: OrganisationOptions): Promise<OrganisationResult> {
   const owner = await listRepositories(input, options);
   const total = owner.repositories.length;
   let scanned = 0;
   options.progress?.(0, total);
-  const results = await pool(owner.repositories, options.concurrency ?? 8, async (listed) => {
-    const result = await scanListed(listed, options);
-    options.progress?.(++scanned, total);
-    return result;
-  });
+  const cache = await options.cache?.();
+  let results: Listed[];
+  let cacheWarnings: string[] = [];
+  try {
+    results = await pool(owner.repositories, options.concurrency ?? 8, async (listed) => {
+      const result = await scanListed(listed, options, cache);
+      options.progress?.(++scanned, total);
+      return result;
+    });
+    cache?.prune(owner.name, owner.repositories.map((repository) => repository.id));
+  } finally {
+    cacheWarnings = cache?.close() ?? [];
+  }
   const repositories = sortRepositories(results.map((result) => result.repository));
   return {
     organisation: { name: owner.name, url: owner.url },
     repositories,
     skills: repositories.reduce((sum, repository) => sum + (repository.skillCount ?? 0), 0),
-    // In the order of the repositories, whatever order the scans ended in.
-    warnings: [...results]
-      .sort((a, b) => repositories.indexOf(a.repository) - repositories.indexOf(b.repository))
-      .flatMap((result) => result.warnings),
+    // In the order of the repositories, whatever order the scans ended in; then the cache's own.
+    warnings: [
+      ...[...results]
+        .sort((a, b) => repositories.indexOf(a.repository) - repositories.indexOf(b.repository))
+        .flatMap((result) => result.warnings),
+      ...cacheWarnings.map((warning) => `cache: ${warning}`),
+    ],
   };
 }
 
-/** One repository of the organisation, on its default branch; never throws: a failure is a warning. */
-async function scanListed(listed: ListedRepository, options: GitHubOptions): Promise<{ repository: OrganisationRepository; warnings: string[] }> {
+type Listed = { repository: OrganisationRepository; warnings: string[] };
+
+/**
+ * One repository of the organisation, on its default branch; never throws: a failure is a warning.
+ * Its commit is always asked for; the rest only when the cache has nothing for that commit. Only a
+ * repository scanned to the end is kept: a failed one is tried again by the next scan.
+ */
+async function scanListed(listed: ListedRepository, options: OrganisationOptions, cache?: RepositoryCache): Promise<Listed> {
   const url = `https://github.com/${listed.id}`;
   try {
-    const result = await scan(await openListed(listed, options));
-    const warnings = result.warnings.map((warning) => `${listed.name}: ${warning}`);
-    return { repository: { name: listed.name, url, commit: result.repository.commit, skillCount: result.total }, warnings };
+    const { commit, source } = await openListed(listed, options);
+    const kept = options.refresh ? undefined : cache?.get(listed.id);
+    let entry = kept?.commit === commit ? kept : undefined;
+    if (!entry) {
+      const result = await scan(await source());
+      entry = { commit, skillCount: result.total, warnings: result.warnings };
+      cache?.set(listed.id, entry);
+    }
+    const warnings = entry.warnings.map((warning) => `${listed.name}: ${warning}`);
+    return { repository: { name: listed.name, url, commit, skillCount: entry.skillCount }, warnings };
   } catch (error) {
     // No commit: no files, so no skills.
     if (error instanceof EmptyRepository) return { repository: { name: listed.name, url, skillCount: 0 }, warnings: [] };

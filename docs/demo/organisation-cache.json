@@ -1,0 +1,19 @@
+{
+  "serve": true,
+  "typingDelay": 60,
+  "steps": [
+    { "caption": "The cache of an organisation's scan: SKILL_ATLAS_CACHE says where; start without one" },
+    { "run": "echo $SKILL_ATLAS_CACHE; rm -f \"${SKILL_ATLAS_CACHE:?}\"*", "pause": 1500 },
+    { "caption": "The first scan: every repository is fetched" },
+    { "run": "time ./skill-atlas scan github.com/Kotlin | head -4", "pause": 3000 },
+    { "caption": "Again: only each repository's commit is asked for; the same output, sooner" },
+    { "run": "time ./skill-atlas scan github.com/Kotlin | head -4", "pause": 3500 },
+    { "caption": "--no-cache: every repository scanned again, the entries replaced" },
+    { "run": "time ./skill-atlas scan github.com/Kotlin --no-cache | head -4", "pause": 3500 },
+    { "caption": "A broken cache never fails a scan: moved aside, a new one, a warning" },
+    { "run": "echo garbage > $SKILL_ATLAS_CACHE; ./skill-atlas scan github.com/Kotlin | head -2; ls $(dirname $SKILL_ATLAS_CACHE)", "pause": 4500 },
+    { "caption": "The web view uses the same cache: the same repositories and counts" },
+    { "goto": "/?repo=github.com/Kotlin" },
+    { "waitFor": "#org-summary strong", "timeout": 120000, "pause": 4000 }
+  ]
+}

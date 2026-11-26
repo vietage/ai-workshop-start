@@ -40,20 +40,34 @@ export async function openGitHub(input: string, options: GitHubOptions): Promise
 }
 
 /**
- * A repository of an organisation, on its default branch: always through its tree. Code search
- * allows only a few requests a minute, too few for every repository of an organisation.
+ * A repository of an organisation, on its default branch: its commit, one small request, then
+ * `source`, its files, always through its tree. Code search allows only a few requests a minute,
+ * too few for every repository of an organisation. The commit comes first, so that a repository
+ * already scanned at that commit needs no tree.
  */
-export function openListed(repository: ListedRepository, options: GitHubOptions): Promise<Source> {
-  return openAt(client(options), repository.id, repository.defaultBranch, { search: false, searchable: false });
+export async function openListed(repository: ListedRepository, options: GitHubOptions): Promise<{ commit: string; source(): Promise<Source> }> {
+  const github = client(options);
+  const commit = await commitOf(github, repository.id, repository.defaultBranch);
+  return { commit, source: () => sourceAt(github, repository.id, commit, { search: false, searchable: false }) };
 }
 
 /** The ref's commit, and its files: through code search, or through the tree. */
 async function openAt(github: Client, id: string, ref: string, how: { search: boolean; searchable: boolean }): Promise<Source> {
+  return sourceAt(github, id, await commitOf(github, id, ref), how);
+}
+
+/** The commit a branch, a tag or a commit's own name stands for. */
+async function commitOf(github: Client, id: string, ref: string): Promise<string> {
   const { sha } = await github
     .json<{ sha: string }>(`${API}/repos/${id}/commits/${encodePath(ref)}`, `Not found in https://github.com/${id}: ${ref}`)
     .catch((error: unknown) => {
       throw error instanceof EmptyRepository ? new EmptyRepository(`Repository is empty: https://github.com/${id}`) : error;
     });
+  return sha;
+}
+
+/** The commit's files: through code search, or through the tree. */
+async function sourceAt(github: Client, id: string, sha: string, how: { search: boolean; searchable: boolean }): Promise<Source> {
   const warnings: string[] = [];
   const paths = how.search ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings, how.searchable);
   const [organization, repo] = id.split('/');

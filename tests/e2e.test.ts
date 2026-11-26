@@ -3,7 +3,9 @@
 // Needs the network; GITHUB_TOKEN, if set, raises the GitHub rate limit.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
@@ -16,9 +18,9 @@ const REPOSITORIES = [
   { name: 'koog', commit: '709079e4a34d6c9234583352550e6a2b88a0bb85' },
 ];
 
-function atlas(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+function atlas(args: string[], env: Record<string, string> = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(ATLAS, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(ATLAS, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8').on('data', (chunk) => (stdout += chunk));
@@ -44,9 +46,13 @@ for (const { name, commit } of REPOSITORIES) {
 }
 
 // A real organisation, on each repository's default branch, so not a stored output: what is always
-// true of it. vietage owns this repository's fork, which is skipped.
-test('./skill-atlas scan github.com/<org> lists its repositories with their skill counts', { timeout: 60_000 }, async () => {
-  const scanned = await atlas(['scan', 'github.com/vietage']);
+// true of it. vietage owns this repository's fork, which is skipped. Its cache in a directory of
+// the test's own: the first scan is cold, the second warm.
+test('./skill-atlas scan github.com/<org> lists its repositories with their skill counts; the same with a warm cache', { timeout: 120_000 }, async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'skill-atlas-e2e-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const cache = { SKILL_ATLAS_CACHE: join(directory, 'cache.db') };
+  const scanned = await atlas(['scan', 'github.com/vietage'], cache);
   assert.equal(scanned.code, 0, scanned.stderr);
   const [header, ...lines] = scanned.stdout.trimEnd().split('\n');
   const total = /^vietage · (\d+) repositor(?:y|ies) · (\d+) skills?$/.exec(header);
@@ -61,6 +67,12 @@ test('./skill-atlas scan github.com/<org> lists its repositories with their skil
   const sorted = [...repositories].sort((a, b) => b.count - a.count || (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1));
   assert.deepEqual(repositories, sorted);
   assert.ok(!repositories.some(({ name }) => name === 'ai-workshop-start'), 'a fork is skipped');
+  // Again, from the cache; and once more without it: the same output each time (unless a
+  // repository failed, or one was pushed to in between).
+  if (scanned.stderr === '') {
+    assert.deepEqual(await atlas(['scan', 'github.com/vietage'], cache), scanned);
+    assert.deepEqual(await atlas(['scan', 'github.com/vietage', '--no-cache'], cache), scanned);
+  }
 });
 
 test('./skill-atlas scan github.com/<unknown org> → a clear message, exit code 1', { timeout: 60_000 }, async () => {
