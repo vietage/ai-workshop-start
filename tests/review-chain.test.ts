@@ -1,4 +1,4 @@
-// The review chain's forwarder (.agents/review-chain.md, "Wiring"): which PR comment starts which
+// The review chain's forwarder (.agents/review-chain.md, "Wiring"): which commit status starts which
 // Air automation, run as the workflow runs it, against a local webhook.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -33,63 +33,70 @@ const WEBHOOKS = {
   ADDRESS_TOKEN: 'address-token',
 };
 
-/** `node .github/review-chain-forward.mjs` with a comment `body` on PR #9, as the workflow runs it. */
-async function forward(body: string, env: Record<string, string> = WEBHOOKS) {
+const SHA = '6136092a1b2c3d4e5f60718293a4b5c6d7e8f901';
+
+/** `node .github/review-chain-forward.mjs` with a commit status, as the workflow runs it. */
+async function forward(state: string, description: string, env: Record<string, string> = WEBHOOKS, context = 'air-chain/review') {
   received.length = 0;
   const { stdout } = await promisify(execFile)(process.execPath, [FORWARD], {
     env: {
       PATH: process.env.PATH,
-      BODY: body,
+      CONTEXT: context,
+      STATE: state,
+      DESCRIPTION: description,
+      TARGET_URL: 'https://github.com/vietage/ai-workshop-start/pull/9#pullrequestreview-1',
+      SHA,
       REPOSITORY: 'vietage/ai-workshop-start',
-      PR: '9',
-      COMMENT_ID: '123',
-      COMMENT_URL: 'https://github.com/vietage/ai-workshop-start/pull/9#issuecomment-123',
-      AUTHOR: 'jetbrains-air[bot]',
+      SENDER: 'jetbrains-air[bot]',
       ...env,
     },
   });
   return stdout.trim();
 }
 
-const payload = (kind: string) => ({
+const payload = (kind: string, state: string, description: string) => ({
   kind,
   repository: 'vietage/ai-workshop-start',
-  pr: 9,
-  comment_id: 123,
-  comment_url: 'https://github.com/vietage/ai-workshop-start/pull/9#issuecomment-123',
-  author: 'jetbrains-air[bot]',
+  sha: SHA,
+  state,
+  description,
+  target_url: 'https://github.com/vietage/ai-workshop-start/pull/9#pullrequestreview-1',
+  sender: 'jetbrains-air[bot]',
 });
 
-test('a verdict comment, approve or need changes → the address-review webhook, with its token', async () => {
-  for (const verdict of ['approve', 'need-changes']) {
-    const out = await forward(`**Verdict: ${verdict}**\n\nSummary.\n\n<!-- air-chain verdict=${verdict} head=6136092 -->`);
-    assert.equal(out, 'Forwarded verdict for #9 to the automation.');
-    assert.deepEqual(received, [{ path: '/address', authorization: 'ApiKey address-token', body: payload('verdict') }]);
-  }
-});
-
-test('"Ready for review" as the first line, any case, from a person or the agent → the review-pr webhook', async () => {
-  for (const body of ['Ready for review', '  ready for review.  \r\nplease', 'READY FOR REVIEW\n\n<!-- air-chain ready head=abc -->']) {
-    assert.equal(await forward(body), 'Forwarded ready for #9 to the automation.');
-    assert.deepEqual(received, [{ path: '/review', authorization: 'ApiKey review-token', body: payload('ready') }]);
-  }
-});
-
-test('any other comment → nothing is forwarded', async () => {
-  for (const body of [
-    'Looks good, ready for review soon',
-    'LGTM\nReady for review',
-    'Needs a person\n\nThe loop guard.\n\n<!-- air-chain stop -->',
-    'Fixed in abc1234.\n\n<!-- air-chain note -->',
-    '**Verdict: approve**', // the visible line alone, without the marker
+test('a verdict status, success "Verdict: approve" or failure "Verdict: need changes" → the address-review webhook, with its token', async () => {
+  for (const [state, description] of [
+    ['success', 'Verdict: approve'],
+    ['failure', 'Verdict: need changes — 2 bug, 1 test'],
   ]) {
-    assert.equal(await forward(body), 'Not a review chain trigger; nothing to forward.');
+    assert.equal(await forward(state, description), 'Forwarded verdict for 6136092 to the automation.');
+    assert.deepEqual(received, [{ path: '/address', authorization: 'ApiKey address-token', body: payload('verdict', state, description) }]);
+  }
+});
+
+test('a pending "Ready for review" status, any case, from a person or the agent → the review-pr webhook', async () => {
+  for (const description of ['Ready for review', 'ready for review — 3 fixed, 1 declined']) {
+    assert.equal(await forward('pending', description), 'Forwarded ready for 6136092 to the automation.');
+    assert.deepEqual(received, [{ path: '/review', authorization: 'ApiKey review-token', body: payload('ready', 'pending', description) }]);
+  }
+});
+
+test('any other status → nothing is forwarded', async () => {
+  for (const [state, description, context] of [
+    ['error', 'Needs a person: the loop guard'],
+    ['pending', 'Reviewing'],
+    ['success', 'Ready for review'], // the description and the state must agree
+    ['failure', 'Verdict: approve'],
+    ['success', 'Verdict: approve', 'ci/test'], // another context
+    ['pending', 'Ready for review', 'air-chain/other'],
+  ]) {
+    assert.equal(await forward(state, description, WEBHOOKS, context), 'Not a review chain trigger; nothing to forward.');
     assert.deepEqual(received, []);
   }
 });
 
 test('a missing webhook secret → a notice in the log, nothing sent, success', async () => {
-  const out = await forward('Ready for review', { ADDRESS_URL: WEBHOOKS.ADDRESS_URL, ADDRESS_TOKEN: 'x' });
+  const out = await forward('pending', 'Ready for review', { ADDRESS_URL: WEBHOOKS.ADDRESS_URL, ADDRESS_TOKEN: 'x' });
   assert.match(out, /^::notice::AIR_REVIEW_WEBHOOK_URL or AIR_REVIEW_WEBHOOK_TOKEN is not set; not forwarding ready: /);
   assert.deepEqual(received, []);
 });
@@ -97,25 +104,32 @@ test('a missing webhook secret → a notice in the log, nothing sent, success', 
 test('the webhook keeps failing → 3 attempts, then the workflow fails', async () => {
   status = 500;
   try {
-    await assert.rejects(forward('Ready for review'), /Air webhook for ready failed: 500/);
+    await assert.rejects(forward('pending', 'Ready for review'), /Air webhook for ready failed: 500/);
     assert.equal(received.length, 3);
   } finally {
     status = 200;
   }
 });
 
-/** The comment template in a skill's SKILL.md that starts with `firstLine`. */
-function template(name: string, firstLine: string) {
-  const block = skill(name).match(new RegExp('```markdown\\n(' + firstLine.replace(/[*]/g, '\\*') + '\\n[\\s\\S]*?)```'));
-  assert.ok(block, `${name} shows its "${firstLine}" comment`);
-  return block[1];
+/** The `air-chain/review` statuses a skill's SKILL.md sets, as `[state, description]`. */
+function statuses(name: string) {
+  const found = [...skill(name).matchAll(/-f context=air-chain\/review -f state=(\w+) \\\n\s*-f description="([^"]*)"/g)];
+  return found.map((m) => [m[1], m[2]] as const);
 }
 
-test('the comments the skills post, as their SKILL.md shows them, start the automation the chain says', async () => {
-  assert.equal(await forward(template('review-pr', '**Verdict: approve**')), 'Forwarded verdict for #9 to the automation.');
-  assert.deepEqual(received.map((r) => r.path), ['/address']);
-  assert.equal(await forward(template('address-review', 'Ready for review')), 'Forwarded ready for #9 to the automation.');
+test('the statuses the skills set, as their SKILL.md shows them, start the automation the chain says', async () => {
+  assert.deepEqual(statuses('review-pr'), [
+    ['success', 'Verdict: approve'],
+    ['failure', 'Verdict: need changes'],
+  ]);
+  for (const [state, description] of statuses('review-pr')) {
+    assert.equal(await forward(state, description), 'Forwarded verdict for 6136092 to the automation.');
+    assert.deepEqual(received.map((r) => r.path), ['/address']);
+  }
+  assert.deepEqual(statuses('address-review').map(([state]) => state), ['pending', 'error']);
+  const [ready, stop] = statuses('address-review');
+  assert.equal(await forward(...ready), 'Forwarded ready for 6136092 to the automation.');
   assert.deepEqual(received.map((r) => r.path), ['/review']);
-  assert.equal(await forward(template('address-review', 'Needs a person')), 'Not a review chain trigger; nothing to forward.');
+  assert.equal(await forward(...stop), 'Not a review chain trigger; nothing to forward.');
   assert.deepEqual(received, []);
 });

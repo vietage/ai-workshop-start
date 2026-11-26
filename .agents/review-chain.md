@@ -1,47 +1,59 @@
 # Review chain
 
-Two agents take every pull request to a merge, talking through PR comments:
+Two agents take every pull request to a merge, talking through one GitHub commit status on the
+PR's head commit, the `air-chain/review` context:
 
 ```text
-PR opened ──────────────┐
-"ready for review" ─────┴─▶ review-pr ──▶ inline comments + "Verdict: approve" or "Verdict: need changes"
+PR opened ───────────────────────┐
+status pending "Ready for review" ┴─▶ review-pr ──▶ inline review + status success "Verdict: approve"
+                                                                  or failure "Verdict: need changes"
                                                                 │
                          address-review ◀───────────────────────┘
                            approve      → merge the PR
-                           need changes → fix, reply, push, comment "ready for review" ─▶ review-pr …
+                           need changes → fix, reply, push, status pending "Ready for review" ─▶ review-pr …
 ```
 
-- [review-pr](skills/review-pr/SKILL.md) reviews the PR's head commit and posts a verdict.
+- [review-pr](skills/review-pr/SKILL.md) reviews the PR's head commit and sets the verdict status.
 - [address-review](skills/address-review/SKILL.md) acts on the verdict: merges, or addresses the
-  comments and asks for another review.
+  findings and asks for another review.
 
-## The comments
+## The status
 
-Each comment both agents post ends with a hidden marker. The agents may post as the same GitHub
-account as a person, so the marker, not the login, says who wrote a comment and what it means.
+A status belongs to a commit, so it says which commit it is about by itself: a verdict counts only
+for the commit it is set on, and a push leaves the new head without one. Only the latest
+`air-chain/review` status of a commit counts. Only people and apps with write access to the
+repository can set statuses, so every status is trusted; no comments drive the chain.
 
-| Comment | Posted by | First line | Marker |
-| --- | --- | --- | --- |
-| Review request | address-review, or a person | `Ready for review` | `<!-- air-chain ready head=<sha> -->` (a person can leave it out) |
-| Verdict | review-pr | `**Verdict: approve**` or `**Verdict: need changes**` | `<!-- air-chain verdict=approve head=<sha> -->` or `verdict=need-changes` |
-| Hand-off to a person | either | `Needs a person` | `<!-- air-chain stop -->` |
+| State | Description starts with | Set by | `target_url` | Means |
+| --- | --- | --- | --- | --- |
+| `pending` | `Ready for review` | address-review, or a person | the commit | review this commit |
+| `success` | `Verdict: approve` | review-pr | the review, or the PR | approved; merge it |
+| `failure` | `Verdict: need changes` | review-pr | the review | address the review |
+| `error` | `Needs a person: <why>` | address-review | what blocks it | the chain stops |
 
-- `head=<sha>` is the full SHA of the commit the comment is about: the one reviewed, or the one
-  pushed. A verdict counts only for that commit.
-- Every other comment and reply the agents post ends with `<!-- air-chain note -->`: it triggers
-  nothing, and marks the comment as an agent's.
-- `Needs a person` ends the chain on that PR: neither agent acts until a person comments
-  `Ready for review` again.
-- Only comments from `jetbrains-air[bot]` or from people who may change the repository
-  (`author_association` `OWNER`, `MEMBER` or `COLLABORATOR`) count. On a public repository anyone
-  can comment.
+```bash
+gh api "repos/$repo/statuses/<sha>" -f context=air-chain/review -f state=<state> \
+  -f description="<at most 140 characters>" -f target_url="<url>"
+# the latest air-chain/review status of a commit
+gh api "repos/$repo/commits/<sha>/statuses" --jq '[.[] | select(.context == "air-chain/review")][0]'
+```
+
+- `Needs a person` ends the chain on that commit: neither agent acts until a person sets
+  `Ready for review` again (the command above, `state=pending`).
+- `air-chain/review` can be a required status check in branch protection: it is green only when
+  review-pr approved the head commit.
+- The review itself is a PR review (`event: COMMENT`) with inline comments; its body holds the
+  summary and the findings outside the diff. Replies the agents post in its threads end with
+  `<!-- air-chain note -->`: the agents may post as the same GitHub account as a person, so the
+  marker, not the login, says which replies are an agent's. They trigger nothing.
 
 ## Wiring
 
-Air's GitHub triggers don't fire on comments, so
-[.github/workflows/review-chain.yml](../.github/workflows/review-chain.yml) forwards them to each
-automation's webhook trigger, with the JSON payload
-`{"kind": "ready" | "verdict", "repository", "pr", "comment_id", "comment_url", "author"}`.
+Air's GitHub triggers don't fire on commit statuses, so
+[.github/workflows/review-chain.yml](../.github/workflows/review-chain.yml) forwards each
+`air-chain/review` status to an automation's webhook trigger, with the JSON payload
+`{"kind": "ready" | "verdict", "repository", "sha", "state", "description", "target_url", "sender"}`.
+The skills find the pull request from `sha`: the open PR whose head it is.
 
 | Automation | Instructions | Triggers | Changes |
 | --- | --- | --- | --- |
@@ -51,10 +63,12 @@ automation's webhook trigger, with the JSON payload
 Repository secrets for the workflow, from each webhook trigger's **Copy Webhook URL** and
 **Copy Token**: `AIR_REVIEW_WEBHOOK_URL`, `AIR_REVIEW_WEBHOOK_TOKEN`, `AIR_ADDRESS_WEBHOOK_URL`,
 `AIR_ADDRESS_WEBHOOK_TOKEN`. A missing secret skips that hop with a notice in the workflow log.
+The GitHub app the agents run as needs the `statuses: write` permission. Statuses set with a
+workflow's `GITHUB_TOKEN` start no workflow, so set them as the app or as a person.
 
 ## Loops
 
-- address-review hands the PR to a person (`Needs a person`) after 5 `Ready for review` comments
-  of its own on the PR, or when the reviewer repeats a point it declined with a reason.
-- Both skills are idempotent: a stale trigger (a verdict for an older commit, a request already
-  answered) ends the run with one line and no comment.
+- address-review hands the PR to a person (`Needs a person`) after 5 `Verdict: need changes`
+  statuses on the PR's commits, or when the reviewer repeats a point it declined with a reason.
+- Both skills are idempotent: a stale trigger (a status on a commit that is no longer the head, or
+  one a newer status replaced) ends the run with one line and nothing set or posted.

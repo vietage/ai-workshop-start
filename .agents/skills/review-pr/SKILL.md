@@ -1,13 +1,14 @@
 ---
 name: review-pr
-description: Reviews a pull request's head commit, leaves inline comments that say where each problem is and how to reproduce it, then posts a "Verdict - approve" or "Verdict - need changes" comment. Run by an automation when a PR is opened or someone comments "ready for review".
+description: Reviews a pull request's head commit, leaves inline comments that say where each problem is and how to reproduce it, then sets the "air-chain/review" commit status to "Verdict - approve" or "Verdict - need changes". Run by an automation when a PR is opened or the status is set to "Ready for review".
 ---
 
 # Review PR
 
-The reviewer in the [review chain](../../review-chain.md); read it for the comment protocol.
+The reviewer in the [review chain](../../review-chain.md); read it for the status protocol.
 An automation starts you with a pull request: from a `Pull request | Opened` event, or from a
-webhook whose payload has `pr` and `comment_id` of a `Ready for review` comment.
+webhook whose payload has the `sha` of a commit whose `air-chain/review` status was set to
+`pending` `Ready for review`.
 
 You run **unattended**: don't ask questions, don't wait for input, and don't edit, commit or push
 code. If something is unclear, say so in the review and go on.
@@ -15,33 +16,33 @@ code. If something is unclear, say so in the review and go on.
 ## 1. Check there is something to review
 
 ```bash
-pr=<pr number>
 repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+# from the PR event: its number; from the webhook: the open PR whose head is the payload's sha
+pr=$(gh api "repos/$repo/commits/<sha>/pulls" --jq '[.[] | select(.state == "open" and .head.sha == "<sha>")][0].number')
 gh pr view $pr --json number,title,body,state,isDraft,baseRefName,headRefOid,author
 head=$(gh pr view $pr --json headRefOid -q .headRefOid)
-# the review chain's comments, oldest first
-gh api "repos/$repo/issues/$pr/comments?per_page=100" --paginate \
-  --jq '.[] | select(.body | test("<!-- air-chain (ready|verdict|stop)|^\\s*ready for review"; "i"))
-        | {id, user: .user.login, author_association, created_at, body}'
+# the latest air-chain/review status of the head commit (null if none)
+gh api "repos/$repo/commits/$head/statuses" --jq '[.[] | select(.context == "air-chain/review")][0]
+  | {state, description, target_url, creator: .creator.login, created_at}'
 ```
 
-Stop with one line, posting nothing, when:
+Stop with one line, setting and posting nothing, when:
 
-- the PR is not `OPEN`;
-- you were started by a comment that is not from `jetbrains-air[bot]` or an `OWNER`, `MEMBER` or
-  `COLLABORATOR` (check it: `gh api repos/$repo/issues/comments/<comment_id>`);
-- the latest chain comment is a verdict with `head=$head`: this commit is already reviewed and
+- there is no open PR for the payload's `sha`, or the PR is not `OPEN`;
+- you were started by the webhook and its `sha` is not `$head`: a newer commit gets its own request;
+- the latest status on `$head` is `success` or `failure`: this commit is already reviewed and
   nobody asked again since;
-- the latest chain comment is `Needs a person` and nobody (a person, not an agent) asked
-  `Ready for review` after it.
+- the latest status on `$head` is `error` (`Needs a person`): only a person's `Ready for review`
+  restarts the chain.
 
 ## 2. Collect the change
 
 - `gh pr diff $pr`, and the files it touches at `$head`: `gh pr checkout $pr`.
-- **A re-review** (there are earlier verdicts): also read your earlier findings, the inline
-  threads and the replies to them since
-  (`gh api "repos/$repo/pulls/$pr/comments?per_page=100" --paginate`). The `Ready for review`
-  comment lists what was changed and what was declined, and why.
+- **A re-review** (the PR's commits have an earlier verdict status): also read your earlier reviews
+  (`gh api "repos/$repo/pulls/$pr/reviews?per_page=100" --paginate`), the inline threads and the
+  replies to them since (`gh api "repos/$repo/pulls/$pr/comments?per_page=100" --paginate`). The
+  commit messages since (`gh pr view $pr --json commits`) and the PR body's `Review decisions`
+  section say what was changed and what was declined, and why.
 
 ## 3. Read the context
 
@@ -80,9 +81,10 @@ Stop with one line, posting nothing, when:
 
 ## 6. Post
 
-### Inline comments
+### The review
 
-One per finding, anchored to the changed line it concerns, as one review:
+One PR review on `$head`, with an inline comment per finding anchored to the changed line it
+concerns:
 
 ````markdown
 **<severity>: <one-line problem>**
@@ -101,44 +103,47 @@ Expected: <what the spec or the user expects instead>
 
 - **Severity**: `bug`, `spec`, `test`, `security` or `nit`.
 - **Where**: a path from the repository root and a line in the change's new version. A problem
-  outside the diff goes into the verdict comment with its `path:line`.
+  outside the diff goes into the review body with its `path:line`.
 - **How to reproduce**: commands someone can paste as is; no "run it and see".
 - One problem per comment; the same problem in several places → one comment that lists them.
 
-```bash
-gh api "repos/$repo/pulls/$pr/reviews" --input review.json
-# review.json: {"commit_id": "<$head>", "event": "COMMENT", "body": "<one line> <!-- air-chain note -->",
-#               "comments": [{"path": "...", "line": 12, "side": "RIGHT", "body": "..."}]}
-```
-
-If an inline anchor is rejected, move that finding into the verdict comment. No findings → no
-review; on a re-review, reply in each earlier thread instead (fixed / reason accepted / kept), each
-reply ending with `<!-- air-chain note -->`.
-
-### The verdict comment
-
-Always, as the last thing you post, one PR comment:
+The review body:
 
 ```markdown
-**Verdict: approve**
-
 <at most 5 lines: what the change does, why this verdict, the number of findings by severity>
 Checks: typecheck ✅/❌ · tests ✅/❌ · smoke ✅/❌ — at <short $head>
 
 <findings outside the diff, each with path:line and how to reproduce; on a re-review, which
 earlier findings are fixed, accepted or kept>
 
-<!-- air-chain verdict=approve head=<$head> -->
+<!-- air-chain note -->
 ```
-
-For need changes, the first line is `**Verdict: need changes**` and the marker
-`<!-- air-chain verdict=need-changes head=<$head> -->`, with the full SHA.
 
 ```bash
-gh pr comment $pr --body-file verdict.md
+gh api "repos/$repo/pulls/$pr/reviews" --input review.json --jq .html_url
+# review.json: {"commit_id": "<$head>", "event": "COMMENT", "body": "<the review body>",
+#               "comments": [{"path": "...", "line": 12, "side": "RIGHT", "body": "..."}]}
 ```
 
-Before posting, check the head is still `$head` (`gh pr view $pr --json headRefOid`). If it moved,
-post nothing and stop: a new commit gets reviewed when someone (the agent or a person) comments
-`Ready for review`. Finish by printing the
-PR URL and the verdict.
+If an inline anchor is rejected, move that finding into the review body. On a re-review, also
+reply in each earlier thread (fixed / reason accepted / kept), each reply ending with
+`<!-- air-chain note -->`. An approve with no findings, no failing check and nothing to say about
+earlier findings needs no review: skip it.
+
+### The verdict status
+
+Always, as the last thing you do, set the `air-chain/review` status on `$head`. Before setting it,
+check the head is still `$head` (`gh pr view $pr --json headRefOid`). If it moved, set nothing and
+stop: a new commit gets reviewed when someone (the agent or a person) sets `Ready for review` on it.
+
+```bash
+# approve: target_url is the review's html_url, or the PR's URL if you posted no review
+gh api "repos/$repo/statuses/$head" -f context=air-chain/review -f state=success \
+  -f description="Verdict: approve" -f target_url="<review or PR url>"
+# need changes
+gh api "repos/$repo/statuses/$head" -f context=air-chain/review -f state=failure \
+  -f description="Verdict: need changes" -f target_url="<review url>"
+```
+
+The description may add a short tail after the verdict, such as `Verdict: need changes — 2 bug,
+1 test`, within 140 characters. Finish by printing the PR URL and the verdict.
