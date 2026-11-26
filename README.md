@@ -13,8 +13,12 @@ build-tools-bump-gradle-api — Bumps the Gradle API version that Kotlin Gradle 
 …
 ```
 
+`--filter <word>` prints only the skills whose name or description contains the word, in any case:
+`./skill-atlas scan https://github.com/JetBrains/kotlin --filter gradle`; the header shows `N of M skills`.
+
 Or in a browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
-for the repository link, its skills and each one's SKILL.md (`--port <port>` for another port).
+for the repository link, its skills (with a field to filter them) and each one's SKILL.md
+(`--port <port>` for another port).
 
 Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests.
 

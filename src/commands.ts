@@ -17,6 +17,7 @@ export type Context = {
 const usage = `Usage: skill-atlas <command>
 
   scan <GitHub URL | directory>   find every SKILL.md in a repository and print it
+    --filter <word>               only the skills whose name or description contains the word
   serve [--port <port>]           open a local web view, at http://localhost:4173 by default
   help                            show this help`;
 
@@ -36,10 +37,20 @@ export async function run(args: string[], context: Context): Promise<number> {
   }
 }
 
+const scanUsage = 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <word>]';
+
 async function scanCommand(args: string[], context: Context) {
-  if (args.length !== 1) throw new AtlasError('Usage: skill-atlas scan <GitHub URL | directory>');
-  const result = await scan(await context.open(args[0]));
-  printRepository(result.repository, result.skills, context);
+  const inputs: string[] = [];
+  let filter: string | undefined;
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] !== '--filter') inputs.push(args[index]);
+    // One word, right after the flag: not missing, not empty, not the flag again.
+    else if (filter === undefined && args[index + 1]?.trim() && args[index + 1] !== '--filter') filter = args[++index];
+    else throw new AtlasError(scanUsage);
+  }
+  if (inputs.length !== 1) throw new AtlasError(scanUsage);
+  const result = await scan(await context.open(inputs[0]), { filter });
+  printRepository(result.repository, result.skills, filter === undefined ? undefined : { filter, total: result.total }, context);
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
 }
 
@@ -52,9 +63,20 @@ async function serveCommand(args: string[], context: Context) {
   await context.serve(port);
 }
 
-/** `<owner>/<repo> · N skills`, then each skill's name, first sentence and link. */
-function printRepository(repository: Repository, skills: Skill[], { print }: Context) {
-  print(`${repository.id} · ${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}`);
+/**
+ * `<owner>/<repo> · N skills`, or `· N of M skills` when filtered, then each skill's name, first
+ * sentence and link; `no skills match "<word>"` when the filter leaves none.
+ */
+function printRepository(
+  repository: Repository,
+  skills: Skill[],
+  filtered: { filter: string; total: number } | undefined,
+  { print }: Context,
+) {
+  const total = filtered?.total ?? skills.length;
+  const shown = filtered ? `${skills.length} of ` : '';
+  print(`${repository.id} · ${shown}${total} ${total === 1 ? 'skill' : 'skills'}`);
+  if (filtered && skills.length === 0) print(`no skills match "${filtered.filter}"`);
   for (const skill of skills) {
     print(skill.description ? `${skill.name} — ${firstSentence(skill.description)}` : skill.name);
     print(`  ${skillLink(repository, skill)}`);

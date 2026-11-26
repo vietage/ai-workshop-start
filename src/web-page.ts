@@ -20,6 +20,9 @@ export const PAGE = `<!doctype html>
   #list { border-right: 1px solid var(--border); overflow: auto; }
   #summary { padding: 12px 16px; color: var(--muted); }
   #summary strong { color: CanvasText; }
+  #filter { display: block; width: calc(100% - 32px); margin: 0 16px 12px; padding: 6px 10px; }
+  #no-match { margin: 0; padding: 10px 16px; border-top: 1px solid var(--border); color: var(--muted); }
+  #no-match:empty { display: none; }
   #skills { list-style: none; margin: 0; padding: 0; }
   #skills li { padding: 10px 16px; border-top: 1px solid var(--border); cursor: pointer; }
   #skills li:hover { background: #8881; }
@@ -50,6 +53,8 @@ export const PAGE = `<!doctype html>
 <main id="main" hidden>
   <section id="list">
     <div id="summary"></div>
+    <input id="filter" type="search" placeholder="Filter by name or description" aria-label="Filter skills" autocomplete="off">
+    <p id="no-match"></p>
     <ul id="skills" role="listbox"></ul>
     <ul id="warnings"></ul>
   </section>
@@ -63,26 +68,38 @@ const element = (tag, className, text) => {
   if (text !== undefined) node.textContent = text;
   return node;
 };
+// The scan shown, its link, and the selected skill's path.
 let result;
+let scanned;
+let selected;
+
+// The same rule as filterSkills in src/core/model.ts: the name or the description contains the
+// word, in any case.
+const matches = (skill, word) =>
+  [skill.name, skill.description].some((text) => text.toLowerCase().includes(word.toLowerCase()));
+const filterWord = () => $('filter').value.trim();
 
 function setUrl(repo, skill) {
   const params = new URLSearchParams();
   if (repo) params.set('repo', repo);
   if (skill) params.set('skill', skill);
+  if (filterWord()) params.set('filter', filterWord());
   const query = params.toString();
   history.replaceState(null, '', query ? '?' + query : location.pathname);
 }
 
-async function scan(repo, selected) {
+async function scan(repo, skill) {
   $('scan').disabled = true;
   $('scan').textContent = 'Scanning…';
   $('error').textContent = '';
   try {
+    // The whole repository: the filter narrows it here, as you type, without scanning again.
     const response = await fetch('/api/scan?repo=' + encodeURIComponent(repo));
     const body = await response.json();
     if (!response.ok) throw new Error(body.error);
     result = body;
-    show(repo, selected);
+    scanned = repo;
+    show(skill);
   } catch (error) {
     result = undefined;
     setUrl(repo);
@@ -94,13 +111,16 @@ async function scan(repo, selected) {
   }
 }
 
-function show(repo, selected) {
-  const { repository, skills, warnings } = result;
+/** The repository, and its skills that match the filter; the skill at \`path\` selected if shown. */
+function show(path) {
+  const { repository, skills: all, warnings } = result;
+  const word = filterWord();
+  const skills = word ? all.filter((skill) => matches(skill, word)) : all;
   $('main').hidden = false;
   const summary = $('summary');
   summary.replaceChildren(
     element('strong', '', repository.id),
-    ' · ' + skills.length + (skills.length === 1 ? ' skill' : ' skills'),
+    ' · ' + (word ? skills.length + ' of ' : '') + all.length + (all.length === 1 ? ' skill' : ' skills'),
     repository.commit ? ' · ' + repository.commit.slice(0, 12) : '',
   );
   $('skills').replaceChildren(...skills.map((skill) => {
@@ -111,20 +131,25 @@ function show(repo, selected) {
     if (skill.summary) item.append(element('div', 'description', skill.summary));
     item.append(element('div', 'path', skill.path));
     if (skill.copies.length) item.append(element('div', 'copies', 'also in ' + skill.copies.join(', ')));
-    item.addEventListener('click', () => select(repo, skill.path));
+    item.addEventListener('click', () => select(skill.path));
     return item;
   }));
+  $('no-match').textContent = word && !skills.length ? 'no skills match "' + word + '"' : '';
   $('warnings').replaceChildren(...warnings.map((warning) => element('li', '', warning)));
-  const initial = skills.find((skill) => skill.path === selected) ?? skills[0];
-  select(repo, initial?.path);
+  const initial = skills.find((skill) => skill.path === path) ?? skills[0];
+  select(initial?.path);
 }
 
-function select(repo, path) {
+function select(path) {
   const skill = result.skills.find((skill) => skill.path === path);
+  selected = skill?.path;
   for (const item of $('skills').children) item.setAttribute('aria-selected', String(item.dataset.path === path));
-  setUrl(repo, skill?.path);
+  setUrl(scanned, selected);
   const pane = $('skill');
-  if (!skill) return pane.replaceChildren(element('p', 'placeholder', 'No skills in this repository.'));
+  if (!skill) {
+    const text = result.skills.length ? 'No skill selected.' : 'No skills in this repository.';
+    return pane.replaceChildren(element('p', 'placeholder', text));
+  }
   const link = element('a', '', skill.link);
   link.href = skill.link;
   link.target = '_blank';
@@ -133,6 +158,10 @@ function select(repo, path) {
   pane.querySelector('pre').id = 'content';
 }
 
+$('filter').addEventListener('input', () => {
+  if (result) show(selected);
+});
+
 $('form').addEventListener('submit', (event) => {
   event.preventDefault();
   const repo = $('repo').value.trim();
@@ -140,6 +169,7 @@ $('form').addEventListener('submit', (event) => {
 });
 
 const params = new URLSearchParams(location.search);
+$('filter').value = params.get('filter') ?? '';
 if (params.get('repo')) {
   $('repo').value = params.get('repo');
   scan(params.get('repo'), params.get('skill'));
