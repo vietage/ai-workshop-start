@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: Reviews a pull request's head commit, leaves inline comments that say where each problem is and how to reproduce it, then sets the "air-chain/review" commit status to "Verdict - approve" or "Verdict - need changes". Run by an automation when a PR is opened or the status is set to "Ready for review".
+description: Reviews a pull request's head commit, leaves inline comments that say where each problem is and how to reproduce it, posts a review whose body states the verdict, then sets the "air-chain/review" commit status to "Verdict - approve" or "Verdict - need changes". Run by an automation when a PR is opened or the status is set to "Ready for review", and by address-review to re-review its fixes.
 ---
 
 # Review PR
@@ -8,7 +8,12 @@ description: Reviews a pull request's head commit, leaves inline comments that s
 The reviewer in the [review chain](../../review-chain.md); read it for the status protocol.
 An automation starts you with a pull request: from a `Pull request | Opened` event, or from a
 webhook whose payload has the `sha` of a commit whose `air-chain/review` status was set to
-`pending` `Ready for review`.
+`pending` `Ready for review`, or by [address-review](../address-review/SKILL.md), which re-reviews
+the commit it just pushed (step 7 there) and then merges on your approve.
+
+Every review you post states its verdict and sets the status. Both are needed: the author's side
+may be started by the review itself (a `pull_request_review` event) and read the verdict from the
+review, or by the forwarded status. A verdict nobody can read stops the PR short of a merge.
 
 You run **unattended**: don't ask questions, don't wait for input, and don't edit, commit or push
 code. If something is unclear, say so in the review and go on.
@@ -30,8 +35,9 @@ Stop with one line, setting and posting nothing, when:
 
 - there is no open PR for the payload's `sha`, or the PR is not `OPEN`;
 - you were started by the webhook and its `sha` is not `$head`: a newer commit gets its own request;
-- the latest status on `$head` is `success` or `failure`: this commit is already reviewed and
-  nobody asked again since;
+- the latest status on `$head` is `success` or `failure`, or a review on `$head` (`commit_id`) already
+  has a `Verdict:` line: this commit is already reviewed (by you, or by another run started for
+  the same commit) and nobody asked again since;
 - the latest status on `$head` is `error` (`Needs a person`): only a person's `Ready for review`
   restarts the chain.
 
@@ -110,6 +116,7 @@ Expected: <what the spec or the user expects instead>
 The review body:
 
 ```markdown
+**Verdict: approve** | **Verdict: need changes**
 <at most 5 lines: what the change does, why this verdict, the number of findings by severity>
 Checks: typecheck ✅/❌ · tests ✅/❌ · smoke ✅/❌ — at <short $head>
 
@@ -127,8 +134,10 @@ gh api "repos/$repo/pulls/$pr/reviews" --input review.json --jq .html_url
 
 If an inline anchor is rejected, move that finding into the review body. On a re-review, also
 reply in each earlier thread (fixed / reason accepted / kept), each reply ending with
-`<!-- air-chain note -->`. An approve with no findings, no failing check and nothing to say about
-earlier findings needs no review: skip it.
+`<!-- air-chain note -->`. Always post the review, an approve with no findings too (its body is
+the verdict line and the checks): the review is what says this commit was reviewed. The verdict
+line uses exactly these words, `Verdict: approve` or `Verdict: need changes`, never synonyms
+such as "request changes".
 
 ### The verdict status
 
@@ -137,7 +146,7 @@ check the head is still `$head` (`gh pr view $pr --json headRefOid`). If it move
 stop: a new commit gets reviewed when someone (the agent or a person) sets `Ready for review` on it.
 
 ```bash
-# approve: target_url is the review's html_url, or the PR's URL if you posted no review
+# approve: target_url is the review's html_url
 gh api "repos/$repo/statuses/$head" -f context=air-chain/review -f state=success \
   -f description="Verdict: approve" -f target_url="<review or PR url>"
 # need changes

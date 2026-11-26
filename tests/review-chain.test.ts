@@ -126,10 +126,14 @@ test('the statuses the skills set, as their SKILL.md shows them, start the autom
     assert.equal(await forward(state, description), 'Forwarded verdict for 6136092 to the automation.');
     assert.deepEqual(received.map((r) => r.path), ['/address']);
   }
-  assert.deepEqual(statuses('address-review').map(([state]) => state), ['pending', 'error']);
-  const [ready, stop] = statuses('address-review');
+  assert.deepEqual(statuses('address-review').map(([state]) => state), ['pending', 'error', 'pending']);
+  const [claim, stop, ready] = statuses('address-review');
   assert.equal(await forward(...ready), 'Forwarded ready for 6136092 to the automation.');
   assert.deepEqual(received.map((r) => r.path), ['/review']);
+  // Claiming the PR and handing it to a person start nothing.
+  assert.match(claim[1], /^Addressing review — /);
   assert.equal(await forward(...stop), 'Not a review chain trigger; nothing to forward.');
+  assert.deepEqual(received, []);
+  assert.equal(await forward(...claim), 'Not a review chain trigger; nothing to forward.');
   assert.deepEqual(received, []);
 });
