@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
+import { run } from '../src/commands.ts';
 import { openGitHub, parseGitHubOwner, parseGitHubUrl } from '../src/core/github.ts';
 import { scanOrganisation } from '../src/core/organisation.ts';
 import { parseSkill } from '../src/core/parse.ts';
@@ -432,6 +433,71 @@ test('organisation: a repository that fails → a warning, the scan goes on; it 
   });
   assert.deepEqual(offline.repositories, [{ name: 'a', url: 'https://github.com/SkillAtlas/a' }]);
   assert.deepEqual(offline.warnings, ['a: not scanned: Cannot reach GitHub: connection refused']);
+});
+
+test('organisation: an answer cut off, one that is not JSON, or an unexpected error → a warning each; the others are listed', async () => {
+  const names = ['cut', 'html', 'odd', ...Array.from({ length: 12 }, (_, index) => `r${String(index).padStart(2, '0')}`)];
+  let requests = 0;
+  const result = await scanOrganisation('github.com/acme', {
+    fetch: async (url) => {
+      requests++;
+      if (url.endsWith('/users/acme')) return Response.json({ login: 'acme', type: 'Organization' });
+      if (url.includes('/orgs/acme/repos')) {
+        return Response.json(names.map((name) => ({ name, full_name: `acme/${name}`, default_branch: 'main', archived: false, fork: false })));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (url.includes('/commits/main')) return Response.json({ sha: EXAMPLE_COMMIT });
+      // The connection cut in the middle of the body.
+      if (url.includes('/acme/cut/git/trees')) {
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"truncated":'));
+            controller.error(new TypeError('terminated'));
+          },
+        });
+        return new Response(stream, { status: 200 });
+      }
+      // A proxy's error page, with a 200.
+      if (url.includes('/acme/html/git/trees')) return new Response('<html>502 Bad Gateway</html>', { status: 200 });
+      // JSON, but not a tree: the scan itself fails.
+      if (url.includes('/acme/odd/git/trees')) return Response.json({ truncated: false });
+      return Response.json({ truncated: false, tree: [] });
+    },
+  });
+  assert.deepEqual(result.repositories.map((repository) => repository.name), [...names.slice(3), 'cut', 'html', 'odd']);
+  assert.deepEqual(result.repositories.slice(-3), ['cut', 'html', 'odd'].map((name) => ({ name, url: `https://github.com/acme/${name}` })));
+  const tree = (name: string) => `https://api.github.com/repos/acme/${name}/git/trees/${EXAMPLE_COMMIT}?recursive=1`;
+  assert.deepEqual(result.warnings, [
+    `cut: not scanned: Cannot read GitHub's answer for ${tree('cut')}: terminated`,
+    `html: not scanned: GitHub answered 200 for ${tree('html')}, but not with JSON`,
+    `odd: not scanned: Unexpected error: Cannot read properties of undefined (reading 'filter')`,
+  ]);
+  // Nothing is still fetching once the scan is done.
+  const done = requests;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(requests, done);
+});
+
+test('an answer that is not JSON, or cut off → a clear message, exit code 1', async () => {
+  const html = async () => new Response('<html>502 Bad Gateway</html>', { status: 200 });
+  await assert.rejects(openGitHub('https://github.com/JetBrains/example', { fetch: html }), {
+    message: 'GitHub answered 200 for https://api.github.com/repos/JetBrains/example, but not with JSON',
+  });
+  const cut = async () =>
+    new Response(new ReadableStream({ start: (controller) => controller.error(new TypeError('terminated')) }), { status: 200 });
+  await assert.rejects(openGitHub('https://github.com/JetBrains/example', { fetch: cut }), {
+    message: "Cannot read GitHub's answer for https://api.github.com/repos/JetBrains/example: terminated",
+  });
+  // The CLI: the message, exit code 1, no stack trace.
+  const errors: string[] = [];
+  const scanned = await run(['scan', 'https://github.com/JetBrains/example'], {
+    open: (input) => openGitHub(input, { fetch: html }),
+    scanOrganisation: (input) => scanOrganisation(input, { fetch: html }),
+    print: () => {},
+    error: (text) => errors.push(text),
+  });
+  assert.equal(scanned, 1);
+  assert.deepEqual(errors, ['GitHub answered 200 for https://api.github.com/repos/JetBrains/example, but not with JSON']);
 });
 
 test('organisation: archived repositories and forks are skipped; every page of the list is read', async () => {

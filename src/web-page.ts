@@ -199,6 +199,11 @@ async function openRepository(name, skill) {
   repository = name;
   for (const item of $('repositories').children) item.setAttribute('aria-selected', String(item.dataset.name === name));
   $('error').textContent = '';
+  // Empty, without a commit: nothing to scan, and no skills, as its count says.
+  if (!entry.commit && entry.skillCount === 0) {
+    result = { repository: { id: entry.url.replace('https://github.com/', '') }, skills: [], total: 0, warnings: [] };
+    return show(skill);
+  }
   const current = organisation;
   try {
     const body = await request(entry.commit ? entry.url + '/tree/' + entry.commit : entry.url);

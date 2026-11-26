@@ -674,6 +674,38 @@ test('page: a repository of the organisation that fails → its message; the org
   }
 });
 
+test('page: an empty repository of the organisation selected → no skills, no error, not scanned again', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    const empty = [...view.$('repositories').children].find((item) => (item as HTMLElement).dataset.name === 'empty') as HTMLElement;
+    const scans = view.scans();
+    empty.dispatchEvent(new view.dom.window.Event('click'));
+    await view.settled(scans);
+    assert.equal(view.scans(), scans);
+    assert.equal(empty.getAttribute('aria-selected'), 'true');
+    assert.equal(view.$('error').textContent, '');
+    assert.equal(view.$('main').hidden, false);
+    assert.equal(view.$('summary').textContent, 'SkillAtlas/empty · 0 skills');
+    assert.deepEqual(view.items(), []);
+    assert.equal(view.$('skill').textContent, 'No skills in this repository.');
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'empty' });
+  } finally {
+    view.close();
+  }
+  // Reload: the same.
+  const reloaded = await page(`/?repo=${encodeURIComponent('github.com/skillatlas')}&repository=empty`);
+  try {
+    await reloaded.settled(1);
+    assert.equal(reloaded.scans(), 1);
+    assert.equal(reloaded.$('error').textContent, '');
+    assert.equal(reloaded.$('summary').textContent, 'SkillAtlas/empty · 0 skills');
+    assert.equal(reloaded.$('skill').textContent, 'No skills in this repository.');
+  } finally {
+    reloaded.close();
+  }
+});
+
 test('page: an unknown organisation → its message, nothing else', { timeout: 5_000 }, async () => {
   const view = await page('/');
   try {

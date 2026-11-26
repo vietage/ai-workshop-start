@@ -18,6 +18,8 @@
   its **repositories** with their counts (`N skills`, or `not scanned`), in the CLI's order, and its
   warnings; no skills until one is selected
   - A repository selected → its skills as for its link, at the commit counted; the filter as today
+  - An empty repository selected → no skills, `No skills in this repository.`, no error; not
+    scanned again
   - It fails → its message; the organisation stays
   - Unknown organisation → its message, nothing else
 - Warnings, under the skills; a failed scan → its message, nothing else

@@ -40,6 +40,8 @@ Skill: id = `repo:path`, name, description, commit, copies
 - The link pins the *scanned commit*
 - Malformed front matter → a *warning*, the scan goes on
 - Unreachable repository → a clear message, exit code 1
+- An answer GitHub cut off, or one that is not JSON (a proxy's error page) → a clear message,
+  exit code 1
 - An empty repository, without a commit → a clear message, exit code 1
 ## Organisation
 `github.com/<org>`: every repository of an organisation, or of a user, each with its **skill count**
@@ -52,8 +54,9 @@ Skill: id = `repo:path`, name, description, commit, copies
 - Sorted by skill count, the most first, then by **name**, *case-insensitive*
 - **Skipped**: archived repositories and forks
 - With `GITHUB_TOKEN`: the private repositories it can see too; a user: their public repositories
-- A repository that fails (unreachable, rate limited, …) → a *warning*, `<repo>: not scanned:
-  <message>`; the scan goes on; it is listed **last**, with *no count* and no commit
+- A repository that fails, *whatever the error* (unreachable, rate limited, an answer cut off or
+  not JSON, an unexpected one) → a *warning*, `<repo>: not scanned: <message>`; the scan goes on;
+  it is listed **last**, with *no count* and no commit
 - An empty repository → *0 skills*, no warning
 - *8 repositories* at a time; no time budget: JetBrains, 549 repositories, in about a minute with
   `GITHUB_TOKEN`

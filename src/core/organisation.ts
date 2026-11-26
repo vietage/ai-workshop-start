@@ -29,8 +29,8 @@ export type OrganisationOptions = GitHubOptions & {
 
 /**
  * Every repository of an organisation, or of a user, without the archived ones and the forks,
- * each scanned on its default branch by the same rules as one repository. A repository that fails
- * is a warning, and the scan goes on.
+ * each scanned on its default branch by the same rules as one repository. A repository that fails,
+ * whatever the error, is a warning, and the scan goes on.
  */
 export async function scanOrganisation(input: string, options: OrganisationOptions): Promise<OrganisationResult> {
   const owner = await listRepositories(input, options);
@@ -43,8 +43,9 @@ export async function scanOrganisation(input: string, options: OrganisationOptio
     } catch (error) {
       // No commit: no files, so no skills.
       if (error instanceof EmptyRepository) return { repository: { name: listed.name, url, skillCount: 0 }, warnings: [] };
-      if (!(error instanceof AtlasError)) throw error;
-      return { repository: { name: listed.name, url }, warnings: [`${listed.name}: not scanned: ${error.message}`] };
+      // Whatever the error, the other repositories are still scanned.
+      const message = error instanceof AtlasError ? error.message : `Unexpected error: ${describe(error)}`;
+      return { repository: { name: listed.name, url }, warnings: [`${listed.name}: not scanned: ${message}`] };
     }
   });
   const repositories = sortRepositories(results.map((result) => result.repository));
@@ -57,6 +58,10 @@ export async function scanOrganisation(input: string, options: OrganisationOptio
       .sort((a, b) => repositories.indexOf(a.repository) - repositories.indexOf(b.repository))
       .flatMap((result) => result.warnings),
   };
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** By skill count, the most first, then by name in any case; the ones without a count last. */

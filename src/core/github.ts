@@ -175,7 +175,7 @@ function client({ fetch, token }: GitHubOptions) {
 
   async function request(url: string, notFound: string): Promise<unknown> {
     const response = await get(url, { headers });
-    if (response.ok) return response.json();
+    if (response.ok) return readBody(response, url, () => response.json());
     const body: unknown = await response.json().catch(() => undefined);
     const message = (body as { message?: unknown } | undefined)?.message;
     const text = typeof message === 'string' ? message : '';
@@ -200,9 +200,19 @@ function client({ fetch, token }: GitHubOptions) {
       const response = await get(url);
       if (response.status === 404) return undefined;
       if (!response.ok) throw new AtlasError(`GitHub answered ${response.status} for ${url}`);
-      return new Uint8Array(await response.arrayBuffer());
+      return new Uint8Array(await readBody(response, url, () => response.arrayBuffer()));
     },
   };
+}
+
+/** A response's body; an answer cut off, or one that is not JSON (a proxy's error page), as a clear message. */
+async function readBody<T>(response: Response, url: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new AtlasError(`GitHub answered ${response.status} for ${url}, but not with JSON`);
+    throw new AtlasError(`Cannot read GitHub's answer for ${url}: ${describe(error)}`);
+  }
 }
 
 function encodePath(path: string): string {
