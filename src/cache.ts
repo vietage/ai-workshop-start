@@ -6,9 +6,17 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { CachedRepository, RepositoryCache } from './core/organisation.ts';
+import { RULES_VERSION } from './core/scan.ts';
 
-/** The schema's version, in the file's `user_version`: a file of another version is emptied. */
-export const CACHE_VERSION = 1;
+/** The version of the table below: raised when its shape changes. */
+const SCHEMA_VERSION = 1;
+
+/**
+ * What makes kept entries valid, in the file's `user_version`: the schema they are in and the
+ * rules that gave their counts and warnings (`RULES_VERSION`). A file of another version, older or
+ * newer, is emptied: its entries are another skill-atlas's answers.
+ */
+export const CACHE_VERSION = SCHEMA_VERSION * 1000 + RULES_VERSION;
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS repositories (
   id TEXT PRIMARY KEY,
@@ -32,8 +40,9 @@ export function cachePath(env: Record<string, string | undefined> = process.env)
 /**
  * Opens the cache, creating the file and its directory on first use. It never throws, and neither
  * does what it returns: a cache that cannot be opened, read or written keeps nothing, and says why
- * once, when closed. A file that is not a database, or a damaged one, is moved to `<file>.corrupt`
- * and a new one created; one of another schema version is emptied.
+ * once, when closed. Once it has failed it is closed and not tried again: a database that stays
+ * locked is waited for once, not for every repository. A file that is not a database, or a damaged
+ * one, is moved to `<file>.corrupt` and a new one created; one of another version is emptied.
  */
 export async function openCache(file: string = cachePath()): Promise<RepositoryCache> {
   const warnings: string[] = [];
@@ -43,15 +52,26 @@ export async function openCache(file: string = cachePath()): Promise<RepositoryC
   } catch (error) {
     warnings.push(`not used: ${describe(error)}`);
   }
-  let failed = false;
-  /** What `work` gives, or undefined when there is no database or it fails; the first failure is a warning. */
+  const shut = () => {
+    try {
+      database?.close();
+    } catch {
+      // Nothing to keep from a cache that does not close.
+    }
+    database = undefined;
+  };
+  /**
+   * What `work` gives, or undefined when there is no database or it fails. A failure is a warning
+   * and the end of the cache's use: each further try on a locked database would wait the whole
+   * busy timeout again, with nothing else running meanwhile (`DatabaseSync` blocks).
+   */
   const attempt = <T>(what: string, work: (database: DatabaseSync) => T): T | undefined => {
     if (!database) return undefined;
     try {
       return work(database);
     } catch (error) {
-      if (!failed) warnings.push(`not ${what}: ${describe(error)}`);
-      failed = true;
+      warnings.push(`not ${what}: ${describe(error)}`);
+      shut();
       return undefined;
     }
   };
@@ -76,12 +96,7 @@ export async function openCache(file: string = cachePath()): Promise<RepositoryC
       );
     },
     close: () => {
-      try {
-        database?.close();
-      } catch {
-        // Nothing to keep from a cache that does not close.
-      }
-      database = undefined;
+      shut();
       return warnings;
     },
   };
@@ -124,7 +139,7 @@ function create(file: string) {
   closeSync(openSync(file, 'a', 0o600));
 }
 
-/** The database with the schema of this version; closed again if it cannot be read. */
+/** The database with the schema of this version, without the entries of another; closed again if it cannot be read. */
 function prepare(database: DatabaseSync): DatabaseSync {
   try {
     const check = database.prepare('PRAGMA quick_check').get();
@@ -156,11 +171,21 @@ function isCorrupt(error: unknown): boolean {
   return code === 26 || code === 11;
 }
 
+let sqlite: Promise<typeof import('node:sqlite')> | undefined;
+
 /**
- * Node's built-in SQLite, loaded on first use. The first Node 24 releases announce it as
- * experimental on stderr; that one warning is dropped, the output stays the same.
+ * Node's built-in SQLite, loaded on first use, once: two scans starting at the same time share the
+ * load, so `process.emitWarning` is replaced and put back once, never one's replacement by the other.
  */
-async function loadSqlite(): Promise<typeof import('node:sqlite')> {
+function loadSqlite(): Promise<typeof import('node:sqlite')> {
+  return (sqlite ??= importSqlite());
+}
+
+/**
+ * The first Node 24 releases announce `node:sqlite` as experimental on stderr; that one warning is
+ * dropped, the output stays the same.
+ */
+async function importSqlite(): Promise<typeof import('node:sqlite')> {
   const emitWarning = process.emitWarning;
   process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
     const text = typeof warning === 'string' ? warning : warning.message;

@@ -80,6 +80,11 @@ fetched again
   it has scanned
 - **The same output** with a cold or a warm cache: repositories, counts, commits, order, warnings,
   progress (a repository from the cache is one more done)
+- **Valid** for one *version*: the file's schema and the **analysis rules** that gave the counts and
+  the warnings (what is a skill, a copy, a warning). An entry kept by a skill-atlas of another
+  version, older or newer, is *never used*: the file is emptied, no warning, and filled again
+  - The rules' version is raised with every change that gives another count or another warning for
+    the same files; a test on `./fixture` fails when they change and it was not
 - **Bypass**: every repository scanned again, whatever is kept, and the entries replaced
 - **Removed**: after a scan, the entries of the organisation's repositories that are *no longer
   listed*: deleted, moved, archived, now a fork; no expiry otherwise, no command to clear it:
@@ -94,9 +99,12 @@ fetched again
   - No file → created
   - Not a database, or a damaged one → moved to `<file>.corrupt`, a new one created, and a
     *warning*, `cache: <file> was not a readable database: …`
-  - Another schema version → emptied, no warning
-  - Cannot be opened, read or written (a directory, no permission) → the scan goes on without it,
-    one *warning*, `cache: not used: <message>` (`not read`, `not saved`)
+  - Another version, of the schema or of the rules → emptied, no warning; see *Valid*
+  - Cannot be opened, read or written (a directory, no permission, a database another program
+    keeps *locked*) → the scan goes on without it, one *warning*, `cache: not used: <message>`
+    (`not read`, `not saved`)
+    - After the first failure the cache is *left alone* for the rest of that scan, nothing more
+      read or saved: a locked database is waited for *once*, 2 s at most, not for every repository
   - The cache's warnings come last, after the repositories'
 - Two scans at the same time, the CLI and the web view: one database, each entry written at once;
   the last one written stays

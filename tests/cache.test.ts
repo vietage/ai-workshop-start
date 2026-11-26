@@ -11,6 +11,7 @@ import { CACHE_VERSION, cachePath, openCache } from '../src/cache.ts';
 import type { Fetch } from '../src/core/github.ts';
 import { scanOrganisation, type Progress } from '../src/core/organisation.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
+import { RULES_VERSION, scan } from '../src/core/scan.ts';
 import { serve } from '../src/web.ts';
 import { atlas, CLI, FIXTURE, github, open, ORGANISATION_COMMIT, TERMINAL } from './helpers.ts';
 
@@ -389,6 +390,47 @@ test('cache: another schema version, older or newer → emptied, no warning; the
   }
 });
 
+test('cache: an entry kept under other analysis rules, same schema and same commit → never used: emptied, no warning, scanned again', async (t) => {
+  const plain = await scanOrganisation(ORG, { fetch: github, token: 'test' });
+  const root = directory(t);
+  // The version says which rules, not only which schema.
+  assert.equal(CACHE_VERSION % 1000, RULES_VERSION);
+  for (const version of [CACHE_VERSION - 1, CACHE_VERSION + 1]) {
+    const file = join(root, `rules-${version}.db`);
+    await scanner(file, github)(ORG);
+    // What a skill-atlas with other rules kept for the same commits, in the same table.
+    sql(file, `UPDATE repositories SET skill_count = 7, warnings = '["a warning the current rules do not give"]';
+      PRAGMA user_version = ${version}`);
+    const scanned = counted();
+    assert.deepEqual(await scanner(file, scanned.fetch)(ORG), plain, `version ${version}`);
+    assert.deepEqual(scanned.trees(), KEPT);
+    assert.deepEqual(Object.values(entries(file)).map((entry) => entry.count), [2, 0, 2, 2, 0]);
+    assert.ok(!existsSync(`${file}.corrupt`));
+    // Kept again, by the current rules.
+    const next = counted();
+    assert.deepEqual(await scanner(file, next.fetch)(ORG), plain);
+    assert.deepEqual(next.trees(), []);
+  }
+});
+
+test('cache: the rules\' version is raised when the rules change: the fixture\'s count and warnings belong to this version', async () => {
+  const result = await scan(await open(FIXTURE));
+  // A difference here means the analysis rules changed: raise RULES_VERSION (src/core/scan.ts), so
+  // that no cache answers with the old rules' counts and warnings, then update what is expected.
+  assert.deepEqual(
+    { version: RULES_VERSION, total: result.total, warnings: result.warnings },
+    {
+      version: 1,
+      total: 4,
+      warnings: [
+        '.agents/skills/release-checklist/SKILL.md: malformed front matter: Nested mappings are not allowed in compact mappings at line 3, column 14; using the directory name',
+        '.claude/skills/commits/SKILL.md: its copies differ: .github/skills/commits/SKILL.md',
+      ],
+    },
+    'the analysis rules changed: raise RULES_VERSION in src/core/scan.ts, then update this test',
+  );
+});
+
 test('cache: cannot be opened (a directory, a file where its directory should be) → the scan without it, one warning', async (t) => {
   const plain = await scanOrganisation(ORG, { fetch: github, token: 'test' });
   const root = directory(t);
@@ -430,6 +472,55 @@ test('cache: cannot be read or written while a scan runs → the scan goes on wi
   assert.deepEqual({ ...result, warnings: plain.warnings }, plain);
 });
 
+test('cache: a database another program keeps locked → waited for once, then left alone: nothing more read or saved, one warning', async (t) => {
+  const plain = await scanOrganisation(ORG, { fetch: github, token: 'test' });
+  const root = directory(t);
+  /** Another connection, as another program's, that takes the lock once the scan has opened the cache. */
+  const locked = (file: string) => {
+    const holder = new DatabaseSync(file);
+    t.after(() => holder.isOpen && holder.close());
+    return {
+      holder,
+      cache: async () => {
+        const cache = await openCache(file);
+        holder.exec('BEGIN EXCLUSIVE');
+        return cache;
+      },
+    };
+  };
+
+  // Locked for the whole scan: one wait of the busy timeout, not two for every repository.
+  const whole = locked(join(root, 'whole.db'));
+  const scanned = counted();
+  const start = Date.now();
+  const result = await scanOrganisation(ORG, { fetch: scanned.fetch, token: 'test', cache: whole.cache });
+  const elapsed = Date.now() - start;
+  whole.holder.exec('ROLLBACK');
+  assert.deepEqual(scanned.trees(), KEPT);
+  assert.deepEqual({ ...result, warnings: result.warnings.slice(0, -1) }, plain);
+  assert.equal(result.warnings.at(-1), 'cache: not read: database is locked');
+  // 2 s for the one wait; 5 repositories read and saved would be 20 s.
+  assert.ok(elapsed < 8000, `${elapsed} ms`);
+  assert.deepEqual(entries(join(root, 'whole.db')), {});
+
+  // Unlocked after the first repository: the cache has failed, the rest of the scan does not use it.
+  const first = locked(join(root, 'first.db'));
+  const result2 = await scanOrganisation(ORG, {
+    fetch: github,
+    token: 'test',
+    concurrency: 1,
+    cache: first.cache,
+    progress: (done) => done === 1 && first.holder.exec('ROLLBACK'),
+  });
+  assert.deepEqual({ ...result2, warnings: result2.warnings.slice(0, -1) }, plain);
+  assert.equal(result2.warnings.at(-1), 'cache: not read: database is locked');
+  assert.deepEqual(entries(join(root, 'first.db')), {});
+  // The next scan, with the lock gone, uses it again.
+  first.holder.close();
+  assert.deepEqual(await scanner(join(root, 'first.db'), github)(ORG), plain);
+  assert.deepEqual(Object.keys(entries(join(root, 'first.db'))), KEPT);
+});
+
 test('cache: an entry that is not what a scan wrote → as if not kept: scanned again, and replaced', async (t) => {
   const plain = await scanOrganisation(ORG, { fetch: github, token: 'test' });
   const file = join(directory(t), 'cache.db');
@@ -457,6 +548,14 @@ test('cache: two scans at the same time on one database → both the same result
   assert.deepEqual(results[1], plain);
   assert.deepEqual(results[2].warnings, []);
   assert.deepEqual(Object.keys(entries(file)), [...KEPT, 'someone/dotfiles']);
+});
+
+test('cache: two caches opened at the same time → process.emitWarning is what it was: other warnings are still given', async (t) => {
+  const root = directory(t);
+  const original = process.emitWarning;
+  const caches = await Promise.all([openCache(join(root, 'a.db')), openCache(join(root, 'b.db')), openCache(join(root, 'c.db'))]);
+  for (const cache of caches) assert.deepEqual(cache.close(), []);
+  assert.equal(process.emitWarning, original);
 });
 
 test('cache: where → SKILL_ATLAS_CACHE, else skill-atlas/cache.db in XDG_CACHE_HOME, else in ~/.cache', () => {
