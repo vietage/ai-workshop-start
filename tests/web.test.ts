@@ -437,3 +437,32 @@ test('page: the URL keeps the filter; reload shows the same', { timeout: 5_000 }
     none.close();
   }
 });
+
+test('page: after a failed scan, changing the filter still updates the URL', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  let href: string;
+  try {
+    await view.enter(FIXTURE);
+    view.filter('zzz');
+    await view.enter('/no/such/directory');
+    view.filter('commit');
+    assert.deepEqual(view.search(), { repo: '/no/such/directory', filter: 'commit' });
+    // Cleared: the filter leaves the URL, the failed link stays.
+    view.filter('');
+    assert.deepEqual(view.search(), { repo: '/no/such/directory' });
+    view.filter('commit');
+    href = view.dom.window.location.href;
+  } finally {
+    view.close();
+  }
+  // A reload brings back the word in the field, and the failed scan's message.
+  const reloaded = await page(new URL(href).pathname + new URL(href).search);
+  try {
+    await reloaded.settled(1);
+    assert.equal((reloaded.$('filter') as HTMLInputElement).value, 'commit');
+    assert.equal(reloaded.$('error').textContent, 'Not a GitHub URL or a readable directory: /no/such/directory');
+    assert.equal(reloaded.$('main').hidden, true);
+  } finally {
+    reloaded.close();
+  }
+});

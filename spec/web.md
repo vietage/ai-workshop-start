@@ -15,6 +15,7 @@
 - Warnings, under the skills; a failed scan → its message, nothing else
 - The page's URL keeps the link, the skill and the filter: `?repo=<link>&skill=<path>&filter=<word>`;
   reload shows the same, a failed scan's message too
+  - After a failed scan, changing the filter still updates `filter=`, with the failed link
 ## API
 `GET /api/scan?repo=<link>[&filter=<word>]` → JSON: `repository`, `skills` (each with its `link`
 and `content`, the SKILL.md text), `total` (the count before the filter), `warnings`

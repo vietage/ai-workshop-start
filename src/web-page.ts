@@ -68,7 +68,7 @@ const element = (tag, className, text) => {
   if (text !== undefined) node.textContent = text;
   return node;
 };
-// The scan shown, its link, and the selected skill's path.
+// The scan shown (undefined after a failed one), the link last scanned, and the selected skill's path.
 let result;
 let scanned;
 let selected;
@@ -102,6 +102,7 @@ async function scan(repo, skill) {
     show(skill);
   } catch (error) {
     result = undefined;
+    scanned = repo;
     setUrl(repo);
     $('main').hidden = true;
     $('error').textContent = error.message;
@@ -159,7 +160,9 @@ function select(path) {
 }
 
 $('filter').addEventListener('input', () => {
+  // After a failed scan there is nothing to narrow, but the URL still keeps the word.
   if (result) show(selected);
+  else setUrl(scanned);
 });
 
 $('form').addEventListener('submit', (event) => {
