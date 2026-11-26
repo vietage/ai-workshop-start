@@ -12,12 +12,15 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "qa": "playwright test -c qa/playwright.config.ts",
+    "qa:issues": "node qa/file-issues.ts"
   },
   "dependencies": {
     "yaml": "^2.9.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^24.19.0",
     "jsdom": "^31.0.1",

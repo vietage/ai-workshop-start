@@ -21,7 +21,9 @@ Or in a browser: `./skill-atlas serve` opens a local web view at http://localhos
 for the repository link, its skills (with a field to filter them) and each one's SKILL.md
 (`--port <port>` for another port).
 
-Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests.
+Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests. `npm run qa` tests the
+web view in a browser, scenario by scenario, and records each one; `npm run qa:issues` files an issue
+for each failure ([qa/](qa/README.md), the [manual-qa skill](.agents/skills/manual-qa/SKILL.md)).
 
 - [spec/](spec/): what it does. [AGENTS.md](AGENTS.md): the definition of done.
 - [fixture/](fixture/README.md): a small repository for the tests.
