@@ -2,10 +2,8 @@ import { readdir, readFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { AtlasError } from './core/errors.ts';
+import { SKIPPED } from './core/find.ts';
 import type { Source } from './core/scan.ts';
-
-/** Never part of a repository's own files. */
-const SKIPPED = new Set(['.git', 'node_modules']);
 
 /** A local checkout as a repository: named after its directory, linked with file:// URLs. */
 export async function openDirectory(input: string): Promise<Source> {
