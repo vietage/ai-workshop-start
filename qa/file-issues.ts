@@ -43,7 +43,7 @@ type ReportResult = {
 type ReportStep = { title: string; error?: unknown; steps?: ReportStep[] };
 type ReportSpec = { title: string; file: string; tests: { results: ReportResult[] }[] };
 type ReportSuite = { specs?: ReportSpec[]; suites?: ReportSuite[] };
-export type Report = { suites: ReportSuite[] };
+export type Report = { config?: { metadata?: { commit?: string } }; suites: ReportSuite[] };
 
 const stripAnsi = (text: string) => text.replace(/\u001b\[[0-9;]*m/g, '');
 
@@ -178,7 +178,8 @@ function main() {
 
   const dry = values['dry-run'];
   const repo = dry ? process.env.QA_REPO ?? '<owner>/<repo>' : gh(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']);
-  const commit = git(['rev-parse', 'HEAD']);
+  // The commit the run tested; HEAD only for a run recorded before the report kept it.
+  const commit = report.config?.metadata?.commit || git(['rev-parse', 'HEAD']);
   if (!dry) {
     ensureLabel(LABEL, '8b03eb', 'An AI agent picks this up');
     ensureLabel(QA_LABEL, 'fbca04', 'Found by manual QA (qa/)');

@@ -11,7 +11,7 @@ files an issue for each failure.
 | `scripts/helpers.ts` | What the scripts share |
 | `playwright.config.ts` | Starts the web view on port 4174 (`QA_PORT`), records every run |
 | `file-issues.ts` | Files an issue per failed scenario, with its video |
-| `results/<run>/` | A run: `report.json`, and per scenario a video, a trace and a screenshot (not committed) |
+| `results/<run>/` | A run: `report.json` (with the commit it tested), and per scenario a video, a trace and a screenshot (not committed) |
 
 ```bash
 npx playwright install chromium   # once; or QA_CHANNEL=chrome for an installed Google Chrome

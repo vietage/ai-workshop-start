@@ -85,7 +85,8 @@ npm run qa:issues -- --scenario <id> [--scenario <id>]...
 For each scenario, this does the following:
 - uploads its video to the `qa-recordings` pre-release
 - files `[QA] <id>: <title> fails` with the labels `Delegated to AI`, `qa` and `bug`. The body has
-  the scenario, the failed step, the error, the commit, how to reproduce and the video link.
+  the scenario, the failed step, the error, the commit the run tested, how to reproduce and the
+  video link.
 - if that scenario already has an open issue, comments on it instead of filing a duplicate
 
 `--run <run>` files from a run other than the newest. If your findings add to the generated body

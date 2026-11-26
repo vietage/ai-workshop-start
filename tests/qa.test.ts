@@ -1,10 +1,12 @@
 // The decisions in spec/qa.md: every scenario has its script, and which failures become issues and
-// what they say, checked with `qa/file-issues.ts --dry-run` on a report shaped like Playwright's.
+// what they say, checked with `qa/file-issues.ts` on a report shaped like Playwright's: with
+// `--dry-run`, and for real against a stub `gh` that logs its calls.
 // The scripts themselves run in a browser: `npm run qa`.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { failures, issueBody, issueTitle, readScenario, type Report } from '../qa/file-issues.ts';
@@ -94,4 +96,110 @@ test('qa:issues --dry-run: an issue per failure of the run, only the scenarios a
   ]);
   assert.deepEqual(issues('--scenario', 'filter-skills'), ['would file: [QA] filter-skills: Filter the skills as you type fails']);
   assert.deepEqual(issues('--scenario', 'scan-local-directory'), []);
+});
+
+/** A run directory under qa/results with this report, removed after the test. */
+function sampleRun(t: { after: (fn: () => void) => void }, report: Report | ((dir: string) => Report)) {
+  const run = `test-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+  const dir = join(QA, 'results', run);
+  mkdirSync(dir, { recursive: true });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'report.json'), JSON.stringify(typeof report === 'function' ? report(dir) : report));
+  return { run, dir };
+}
+
+test('qa:issues: the issue names the commit the run tested, not the one checked out', (t) => {
+  const tested = 'c0ffee0000000000000000000000000000000000';
+  const { run } = sampleRun(t, { ...REPORT, config: { metadata: { commit: tested } } });
+  const out = spawnSync(process.execPath, [join(QA, 'file-issues.ts'), '--dry-run', '--run', run, '--scenario', 'failed-scan'], { encoding: 'utf8' });
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, new RegExp(`Run: \`${run}\`, commit \`${tested}\``));
+  assert.match(out.stdout, new RegExp(`/blob/${tested}/qa/scenarios/failed-scan\\.md`));
+});
+
+// A `gh` first in PATH: logs each call's arguments, one JSON array per line, and answers
+// `issue list` with GH_STUB_ISSUES. The release does not exist yet, and neither do the labels.
+const GH_STUB = `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_STUB_LOG, JSON.stringify(args) + '\\n');
+const cmd = args.slice(0, 2).join(' ');
+if (cmd === 'repo view') console.log('owner/repo');
+else if (cmd === 'label list') console.log('[]');
+else if (cmd === 'release view') process.exit(1);
+else if (cmd === 'issue list') console.log(process.env.GH_STUB_ISSUES);
+else if (cmd === 'issue create') console.log('https://github.com/owner/repo/issues/7');
+`;
+
+/** Runs `qa:issues` for failed-scan of a sample run, for real against the stub `gh`; its calls. */
+function fileIssues(t: { after: (fn: () => void) => void }, openIssues: object[]) {
+  const { run, dir } = sampleRun(t, (dir) => ({
+    config: { metadata: { commit: 'c0ffee0000000000000000000000000000000000' } },
+    suites: [{
+      specs: [{
+        title: 'failed-scan: A failed scan shows its message and nothing else',
+        file: 'failed-scan.spec.ts',
+        tests: [{
+          results: [result('failed', {
+            errors: [{ message: 'Error: expect(locator).toBeHidden() failed' }],
+            attachments: [{ name: 'video', contentType: 'video/webm', path: join(dir, 'artifacts/video.webm') }],
+          })],
+        }],
+      }],
+    }],
+  }));
+  mkdirSync(join(dir, 'artifacts'));
+  writeFileSync(join(dir, 'artifacts/video.webm'), 'webm');
+  const bin = mkdtempSync(join(tmpdir(), 'gh-stub-'));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(join(bin, 'gh'), GH_STUB);
+  chmodSync(join(bin, 'gh'), 0o755);
+  const log = join(bin, 'calls.jsonl');
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, GH_STUB_LOG: log, GH_STUB_ISSUES: JSON.stringify(openIssues) };
+  delete env.QA_ISSUE_LABEL;
+  const out = spawnSync(process.execPath, [join(QA, 'file-issues.ts'), '--run', run, '--scenario', 'failed-scan'], { encoding: 'utf8', env });
+  assert.equal(out.status, 0, out.stderr);
+  const calls = readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as string[]);
+  return { run, dir, out: out.stdout, calls, call: (cmd: string) => calls.filter((args) => args.slice(0, 2).join(' ') === cmd) };
+}
+
+const TITLE = '[QA] failed-scan: A failed scan shows its message and nothing else fails';
+
+test('qa:issues: a new issue with the labels and a link to the video uploaded to the qa-recordings pre-release', (t) => {
+  const { run, dir, out, call } = fileIssues(t, []);
+  // The labels exist before the issue uses them.
+  assert.deepEqual(call('label create').map((args) => args[2]), ['Delegated to AI', 'qa', 'bug']);
+  // The video, under the run's and the scenario's name, goes to the pre-release.
+  assert.equal(call('release create')[0][2], 'qa-recordings');
+  assert.ok(call('release create')[0].includes('--prerelease'));
+  const video = `${run}-failed-scan.webm`;
+  assert.ok(existsSync(join(dir, video)));
+  assert.deepEqual(call('release upload'), [['release', 'upload', 'qa-recordings', `${join(dir, video)}#failed-scan (${run})`, '--clobber']]);
+  // Looks for an open issue for the scenario, finds none, files one.
+  assert.equal(call('issue list').length, 1);
+  assert.deepEqual(call('issue comment'), []);
+  const [create] = call('issue create');
+  assert.ok(create, 'no issue create');
+  const flag = (name: string) => create.flatMap((arg, i) => (create[i - 1] === name ? [arg] : []));
+  assert.deepEqual(flag('--title'), [TITLE]);
+  assert.deepEqual(flag('--label'), ['Delegated to AI', 'qa', 'bug']);
+  const [body] = flag('--body');
+  assert.match(body, new RegExp(`Video of the failure: https://github\\.com/owner/repo/releases/download/qa-recordings/${video}`));
+  assert.match(body, /commit `c0ffee0{34}`/);
+  assert.match(out, /filed: https:\/\/github\.com\/owner\/repo\/issues\/7/);
+});
+
+test('qa:issues: an open issue for the scenario gets a comment, not a new issue', (t) => {
+  const { out, call } = fileIssues(t, [
+    // The search is fuzzy: only the same title is the scenario's issue.
+    { number: 3, title: '[QA] failed-scan-2: Another scenario fails', url: 'https://github.com/owner/repo/issues/3' },
+    { number: 12, title: TITLE, url: 'https://github.com/owner/repo/issues/12' },
+  ]);
+  assert.deepEqual(call('issue create'), []);
+  const comments = call('issue comment');
+  assert.equal(comments.length, 1);
+  assert.deepEqual(comments[0].slice(0, 4), ['issue', 'comment', '12', '--body']);
+  assert.match(comments[0][4], /^Still failing\.\n\nThe manual QA scenario \*\*failed-scan\*\* failed/);
+  assert.match(comments[0][4], /releases\/download\/qa-recordings\//);
+  assert.match(out, /commented: https:\/\/github\.com\/owner\/repo\/issues\/12/);
 });
