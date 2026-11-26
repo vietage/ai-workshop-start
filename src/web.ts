@@ -46,7 +46,12 @@ export function createWebServer(options: WebOptions): Server {
     const host = (request.headers.host ?? '').replace(/:\d+$/, '').toLowerCase();
     if (!LOCAL_HOSTS.has(host)) return json(403, { error: 'Only http://localhost is served' });
     if (request.method !== 'GET') return json(405, { error: 'Only GET' });
-    const url = new URL(request.url ?? '/', 'http://localhost');
+    let url: URL;
+    try {
+      url = new URL(request.url ?? '/', 'http://localhost');
+    } catch {
+      return json(400, { error: 'Not a valid request target' });
+    }
     if (url.pathname === '/') return send(200, 'text/html', PAGE);
     if (url.pathname !== '/api/scan') return json(404, { error: `Not found: ${url.pathname}` });
     const repo = url.searchParams.get('repo')?.trim();

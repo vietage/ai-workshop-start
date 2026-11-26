@@ -85,6 +85,7 @@ async function scan(repo, selected) {
     show(repo, selected);
   } catch (error) {
     result = undefined;
+    setUrl(repo);
     $('main').hidden = true;
     $('error').textContent = error.message;
   } finally {
