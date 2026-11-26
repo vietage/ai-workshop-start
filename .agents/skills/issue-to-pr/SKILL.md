@@ -61,7 +61,25 @@ Fix failures and run again. Never delete, skip, or weaken an existing test to ma
 unless the issue changes that behaviour and the spec says so. If you can't get everything green,
 still open the PR, but as a draft (`--draft`), and say exactly what fails.
 
-## 5. Open the PR
+## 5. Record a demo
+
+When the change is something a user sees (the CLI's output, the web view, the API), record a
+short video of it with the [record-demo](../record-demo/SKILL.md) skill, after the checks above
+pass and before you open the PR:
+
+1. Write `docs/demo/<slug>.json`: under a minute, a caption per case the issue adds, in the web
+   view and/or the CLI, on `./fixture` or a GitHub link pinned to a commit.
+2. Record `docs/demo/<slug>.mp4`, look at its frames, and fix the script until each step shows
+   what its caption says.
+3. Add it to the table in `docs/demo/README.md`.
+
+Commit the video and its script **with the change**, in the PR's first push: the review chain
+reviews the head commit as soon as the PR is opened, and a later push leaves it without a verdict.
+
+No demo for changes with nothing to see (a refactor, tests, CI); say so in the PR. If recording
+fails (no browser, no network), don't block the PR on it: open it without the video and say why.
+
+## 6. Open the PR
 
 Commit with a message that says what changed and why, and references the issue:
 
@@ -78,6 +96,8 @@ The PR body:
 - **What**: the change, in a few lines
 - **Spec**: the cases added or changed
 - **Tests**: the tests added, and the result of `npm test`
+- **Demo**: the video's link, `https://github.com/<owner>/<repo>/blob/<commit>/docs/demo/<slug>.mp4`,
+  and what it shows in one line; or why there is none
 - **Decisions**: any assumption you made where the issue was ambiguous
 
 Then comment on the issue with the PR link. Finish by printing the PR URL.

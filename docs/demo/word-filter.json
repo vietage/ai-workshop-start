@@ -1,0 +1,30 @@
+{
+  "serve": true,
+  "steps": [
+    { "goto": "/", "pause": 800 },
+    { "caption": "Scan a repository" },
+    { "type": "#repo", "text": "https://github.com/JetBrains/kotlin/tree/952b5c52a87032ff268d359fc0e0fafbf3bfc3b4", "pause": 400 },
+    { "click": "#scan" },
+    { "waitFor": "#skills li", "pause": 2000 },
+    { "caption": "One word: in the name or the description" },
+    { "type": "#filter", "text": "gradle", "pause": 2000 },
+    { "caption": "Several words: every one must match" },
+    { "type": "#filter", "text": " bump", "pause": 2200 },
+    { "caption": "Any case, any order" },
+    { "fill": "#filter" },
+    { "type": "#filter", "text": "BUMP Gradle", "pause": 2200 },
+    { "caption": "\"wrapper\" is only in the description" },
+    { "fill": "#filter" },
+    { "type": "#filter", "text": "gradle wrapper", "pause": 1200 },
+    { "click": "#skills li", "pause": 2000 },
+    { "caption": "No match: a message, not an error" },
+    { "type": "#filter", "text": " xyz", "pause": 2200 },
+    { "caption": "The URL keeps the filter: reload shows the same" },
+    { "fill": "#filter" },
+    { "type": "#filter", "text": "test", "pause": 1500 },
+    { "reload": true },
+    { "waitFor": "#skills li", "pause": 2500 },
+    { "caption": "The same rule in the CLI: --filter" },
+    { "run": "./skill-atlas scan https://github.com/JetBrains/kotlin/tree/952b5c52a87032ff268d359fc0e0fafbf3bfc3b4 --filter \"gradle bump\"", "pause": 3000 }
+  ]
+}
