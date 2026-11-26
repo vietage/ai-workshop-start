@@ -39,6 +39,16 @@ export function sortSkills(skills: Skill[]): Skill[] {
   return [...skills].sort((a, b) => compare(a.name, b.name) || compare(a.path, b.path));
 }
 
+/**
+ * The skills whose name or description contains the word, in any case; all of them without one.
+ * The web page's script does the same; tests/web.test.ts checks that they agree.
+ */
+export function filterSkills(skills: Skill[], word?: string): Skill[] {
+  if (word === undefined) return skills;
+  const needle = word.toLowerCase();
+  return skills.filter((skill) => [skill.name, skill.description].some((text) => text.toLowerCase().includes(needle)));
+}
+
 /** The description's first sentence, on one line. */
 export function firstSentence(text: string): string {
   const line = text.replace(/\s+/g, ' ').trim();
