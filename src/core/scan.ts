@@ -17,19 +17,20 @@ export type ScanResult = { repository: Repository; skills: Skill[]; warnings: st
 
 /** fetch → find → parse. Nothing is stored: the result is all there is. */
 export async function scan(source: Source): Promise<ScanResult> {
-  const files = findSkills(source.paths, source.repository.name);
+  const files = findSkills(source.paths);
   // The files are read at the same time: on GitHub, each one is a request.
   const results = await Promise.all(files.map((file) => readSkill(source, file)));
   return {
     repository: source.repository,
     skills: sortSkills(results.flatMap((result) => (result.skill ? [result.skill] : []))),
-    warnings: [...source.warnings, ...results.flatMap((result) => (result.warning ? [result.warning] : []))],
+    warnings: [...source.warnings, ...results.flatMap((result) => result.warnings)],
   };
 }
 
-async function readSkill(source: Source, file: SkillFile): Promise<{ skill?: Skill; warning?: string }> {
-  const bytes = await source.read(file.path);
-  if (!bytes) return { warning: `${file.path}: listed, but not found at the scanned commit; skipped` };
+async function readSkill(source: Source, file: SkillFile): Promise<{ skill?: Skill; warnings: string[] }> {
+  const [bytes, ...copies] = await Promise.all([file.path, ...file.copies].map((path) => source.read(path)));
+  if (!bytes) return { warnings: [`${file.path}: listed, but not found at the scanned commit; skipped`] };
+  const differing = file.copies.filter((_, index) => copies[index] && !same(bytes, copies[index]));
   const parsed = parseSkill(new TextDecoder().decode(bytes));
   const skill: Skill = {
     id: `${source.repository.id}:${file.path}`,
@@ -40,5 +41,13 @@ async function readSkill(source: Source, file: SkillFile): Promise<{ skill?: Ski
     commit: source.repository.commit,
     copies: file.copies,
   };
-  return { skill, warning: parsed.warning && `${file.path}: ${parsed.warning}` };
+  const warnings = [
+    ...(parsed.warning ? [`${file.path}: ${parsed.warning}`] : []),
+    ...(differing.length > 0 ? [`${file.path}: its copies differ: ${differing.join(', ')}`] : []),
+  ];
+  return { skill, warnings };
+}
+
+function same(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }
