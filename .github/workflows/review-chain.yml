@@ -1,37 +1,63 @@
-# The review chain (.agents/review-chain.md): Air's GitHub triggers don't fire on commit statuses,
-# so this forwards the `air-chain/review` statuses that drive the chain to the Air automations'
-# webhook triggers.
-#   success "Verdict: approve" / failure "Verdict: need changes" → the address-review automation
-#   pending "Ready for review"                                      → the review-pr automation
-# Only people and apps with write access can set statuses, so every status here is trusted.
+# The review chain (.agents/review-chain.md). The agents can neither set commit statuses nor push
+# before their run ends, and Air's GitHub triggers don't fire on statuses or pushes, so this
+# workflow makes each hand-over for them:
+#   a push to a pull request      → status pending "Ready for review" on the new head, and a review
+#                                   of it: the review-pr automation, or address-review without one
+#   a review with a "Verdict:"    → the same verdict as the status of the commit
+#   a status set by a person or an app:
+#     success "Verdict: approve" / failure "Verdict: need changes" → the address-review automation
+#     pending "Ready for review"                                      → as for a push
+# Statuses set here, with GITHUB_TOKEN, start no workflow: nothing is forwarded twice.
 name: Review chain
 on:
   status:
+  pull_request_target:
+    types: [synchronize]
+  pull_request_review:
+    types: [submitted]
 permissions: {}
 concurrency:
-  group: review-chain-${{ github.event.sha }}
+  group: review-chain-${{ github.event_name }}-${{ github.event.sha || github.event.pull_request.head.sha }}-${{ github.event.review.id }}
   cancel-in-progress: false
 jobs:
   forward:
-    # Only the review chain's own status, not CI's or anyone else's.
-    if: github.event.context == 'air-chain/review'
+    # Only the review chain's own status, not CI's; no forks; no replies in review threads.
+    if: >-
+      (github.event_name == 'status' && github.event.context == 'air-chain/review') ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, 'Verdict:'))
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    permissions:
+      contents: read
+      statuses: write
+      pull-requests: write
     steps:
       # The default branch's script, never the pull request's code.
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.repository.default_branch }}
           sparse-checkout: .github
-      - name: Forward to the matching automation
+      - name: Move the chain one step
         env:
-          # The status goes through the environment, never into the script: it is untrusted text.
+          # The event goes through the environment, never into the script: it is untrusted text.
+          EVENT: ${{ github.event_name }}
           CONTEXT: ${{ github.event.context }}
           STATE: ${{ github.event.state }}
           DESCRIPTION: ${{ github.event.description }}
           TARGET_URL: ${{ github.event.target_url }}
-          SHA: ${{ github.event.sha }}
+          SHA: ${{ github.event.sha || github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REVIEW_BODY: ${{ github.event.review.body }}
+          REVIEW_AUTHOR: ${{ github.event.review.user.login }}
+          REVIEW_ASSOCIATION: ${{ github.event.review.author_association }}
+          REVIEW_COMMIT: ${{ github.event.review.commit_id }}
+          REVIEW_HTML_URL: ${{ github.event.review.html_url }}
           REPOSITORY: ${{ github.repository }}
           SENDER: ${{ github.event.sender.login }}
+          GITHUB_TOKEN: ${{ github.token }}
           REVIEW_URL: ${{ secrets.AIR_REVIEW_WEBHOOK_URL }}
           REVIEW_TOKEN: ${{ secrets.AIR_REVIEW_WEBHOOK_TOKEN }}
           ADDRESS_URL: ${{ secrets.AIR_ADDRESS_WEBHOOK_URL }}

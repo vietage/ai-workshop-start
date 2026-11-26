@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: Reviews a pull request's head commit, leaves inline comments that say where each problem is and how to reproduce it, posts a review whose body states the verdict, then sets the "air-chain/review" commit status to "Verdict - approve" or "Verdict - need changes". Run by an automation when a PR is opened or the status is set to "Ready for review", and by address-review to re-review its fixes.
+description: Reviews a pull request's head commit, leaves inline comments that say where each problem is and how to reproduce it, posts a review whose body states the verdict, then sets the "air-chain/review" commit status to "Verdict - approve" or "Verdict - need changes". Run by an automation when a PR is opened or a commit is pushed to it (the status "Ready for review"), and by address-review when no reviewer automation is wired.
 ---
 
 # Review PR
@@ -8,12 +8,15 @@ description: Reviews a pull request's head commit, leaves inline comments that s
 The reviewer in the [review chain](../../review-chain.md); read it for the status protocol.
 An automation starts you with a pull request: from a `Pull request | Opened` event, or from a
 webhook whose payload has the `sha` of a commit whose `air-chain/review` status was set to
-`pending` `Ready for review`, or by [address-review](../address-review/SKILL.md), which re-reviews
-the commit it just pushed (step 7 there) and then merges on your approve.
+`pending` `Ready for review` (the workflow sets it on every push to a PR), or by
+[address-review](../address-review/SKILL.md), which reviews a pushed commit with you when no
+reviewer automation is wired (step 7 there) and then acts on your verdict.
 
-Every review you post states its verdict and sets the status. Both are needed: the author's side
-may be started by the review itself (a `pull_request_review` event) and read the verdict from the
-review, or by the forwarded status. A verdict nobody can read stops the PR short of a merge.
+**Every run that reviews ends with a review whose body states the verdict.** That review is the
+hand-over: its `submitted` event starts address-review, which merges or addresses it, and the
+[workflow](../../../.github/workflows/review-chain.yml) sets the commit's status from its
+`Verdict:` line. Set the status yourself too; when that is refused, the workflow's is enough.
+Never end by asking a person to set a status, start a review or merge.
 
 You run **unattended**: don't ask questions, don't wait for input, and don't edit, commit or push
 code. If something is unclear, say so in the review and go on.
@@ -38,8 +41,8 @@ Stop with one line, setting and posting nothing, when:
 - the latest status on `$head` is `success` or `failure`, or a review on `$head` (`commit_id`) already
   has a `Verdict:` line: this commit is already reviewed (by you, or by another run started for
   the same commit) and nobody asked again since;
-- the latest status on `$head` is `error` (`Needs a person`): only a person's `Ready for review`
-  restarts the chain;
+- the latest status on `$head` is `error` (`Needs a person`): a person decides, and the next push
+  or their `Ready for review` restarts the chain;
 - an address-review run holds a live claim on the PR (a comment with `<!-- air-chain claim -->`,
   edited in the last 2 hours; see address-review, step 1) and that run did not start you: it
   re-reviews its own commits.
@@ -156,8 +159,7 @@ such as "request changes".
 
 Always, as the last thing you do, set the `air-chain/review` status on `$head`. Before setting it,
 check the head is still `$head` (`gh pr view $pr --json headRefOid`). If it moved, set nothing and
-stop: the new commit is re-reviewed by the address-review run that pushed it, or by you when a
-person sets `Ready for review` on it.
+stop: the push of the new commit set `Ready for review` on it, which starts its own review.
 
 ```bash
 # approve: target_url is the review's html_url
@@ -168,8 +170,9 @@ gh api "repos/$repo/statuses/$head" -f context=air-chain/review -f state=failure
   -f description="Verdict: need changes" -f target_url="<review url>"
 ```
 
-If GitHub refuses the status with `403` (the token has no `statuses: write`), the review's
-`Verdict:` line still carries the verdict: say so when you finish, and don't retry.
+If GitHub refuses the status with `403` (the token has no `statuses: write`), don't retry and
+don't report it as a problem: the workflow sets the same status from the review's `Verdict:`
+line, and the review itself starts address-review.
 
 The description may add a short tail after the verdict, such as `Verdict: need changes — 2 bug,
 1 test`, within 140 characters. Finish by printing the PR URL and the verdict.

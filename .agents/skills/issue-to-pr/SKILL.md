@@ -74,7 +74,7 @@ pass and before you open the PR:
 3. Add it to the table in `docs/demo/README.md`.
 
 Commit the video and its script **with the change**, in the PR's first push: the review chain
-reviews the head commit as soon as the PR is opened, and a later push leaves it without a verdict.
+reviews the head commit as soon as the PR is opened, and every later push starts another review.
 
 No demo for changes with nothing to see (a refactor, tests, CI); say so in the PR. If recording
 fails (no browser, no network), don't block the PR on it: open it without the video and say why.

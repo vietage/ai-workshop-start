@@ -1,28 +1,35 @@
 # Review chain
 
-Two agents take every pull request to a merge, talking through one GitHub commit status on the
-PR's head commit, the `air-chain/review` context:
+Two agents take every pull request to a merge. The chain's state is one GitHub commit status on
+the PR's head commit, the `air-chain/review` context, and no step waits for a person to set it:
 
 ```text
-PR opened ───────────────────────┐
-status pending "Ready for review" ┴─▶ review-pr ──▶ review "Verdict: …" + status success "Verdict: approve"
-                                                                       or failure "Verdict: need changes"
-                                                                │
-                         address-review ◀───────────────────────┘  (the status, or the review submitted)
-                           claim the PR (one run at a time)
-                           approve      → merge the PR
-                           need changes → fix, push, reply ─▶ review-pr on the new commit (same run)
-                                            ▲                    │ approve → merge the PR
-                                            └── need changes ────┘ (at most 5 rounds, then a person)
+PR opened ──────────────────────────┐
+push to the PR ─▶ workflow: status  │
+        pending "Ready for review" ─┴▶ review-pr ─▶ review "Verdict: …" ─▶ workflow: status
+            ▲                                         │        success "Verdict: approve"
+            │                                         │     or failure "Verdict: need changes"
+            │                                         ▼
+            │                 address-review (the review submitted, or the status)
+            │                   claim the PR (one run at a time)
+            │                   approve      → merge the PR
+            └── the fix's push ◀─ need changes → fix, reply, commit    (at most 5 rounds, then a person)
 ```
 
-- [review-pr](skills/review-pr/SKILL.md) reviews the PR's head commit, posts a review whose body
-  says `Verdict: approve` or `Verdict: need changes`, and sets the verdict status.
+- [review-pr](skills/review-pr/SKILL.md) reviews the PR's head commit and posts a review whose
+  body says `Verdict: approve` or `Verdict: need changes`.
 - [address-review](skills/address-review/SKILL.md) acts on the verdict: merges, or addresses the
-  findings, pushes, **re-reviews the new commit with review-pr in the same run**, and repeats
-  until it merges or hands the PR to a person. A reviewed PR whose comments are addressed is
-  always re-reviewed and, when approved, merged; it never waits on a trigger that may not come.
-  It sets no `Ready for review` on its own commits: only its own reviewer reviews them.
+  findings and commits. The push of that commit starts the next review.
+- [The workflow](../.github/workflows/review-chain.yml) makes the hand-overs the agents can't:
+  it sets the status on every push to a PR and from every review with a verdict, and starts the
+  review of a pushed commit.
+
+**Why a workflow.** Two things an agent's run may be unable to do, both seen in this repository:
+set a commit status (`403 Resource not accessible by integration`: the app has no `statuses:
+write`), and push (Air pushes the run's commit only after the run ends, so the run can't set or
+start anything on it). The workflow's `GITHUB_TOKEN` can set statuses, and the workflow runs on
+the push itself, whoever makes it and whenever. So a skill never ends with "set `Ready for
+review` to continue": that is always done for it.
 
 ## The status
 
@@ -31,14 +38,15 @@ for the commit it is set on, and a push leaves the new head without one. Only th
 `air-chain/review` status of a commit counts. Only people and apps with write access to the
 repository can set statuses, so every status is trusted. Besides the statuses, only a review's
 `Verdict:` line counts, and only from `jetbrains-air[bot]` or people with write access (`OWNER`,
-`MEMBER`, `COLLABORATOR`); no comments drive the chain.
+`MEMBER`, `COLLABORATOR`); no comments drive the chain. A `pending` status is not a verdict: a
+review with a verdict on the same commit wins over it.
 
 | State | Description starts with | Set by | `target_url` | Means |
 | --- | --- | --- | --- | --- |
-| `pending` | `Ready for review` | a person | the commit | review this commit |
-| `success` | `Verdict: approve` | review-pr | the review, or the PR | approved; merge it |
-| `failure` | `Verdict: need changes` | review-pr | the review | address the review |
-| `error` | `Needs a person: <why>` | address-review | what blocks it | the chain stops |
+| `pending` | `Ready for review` | the workflow, on a push to the PR; or a person | the commit | review this commit |
+| `success` | `Verdict: approve` | the workflow, from the review; review-pr when it can | the review | approved; merge it |
+| `failure` | `Verdict: need changes` | the workflow, from the review; review-pr when it can | the review | address the review |
+| `error` | `Needs a person: <why>` | address-review, when it can | what blocks it | the chain stops |
 
 ```bash
 gh api "repos/$repo/statuses/<sha>" -f context=air-chain/review -f state=<state> \
@@ -47,8 +55,11 @@ gh api "repos/$repo/statuses/<sha>" -f context=air-chain/review -f state=<state>
 gh api "repos/$repo/commits/<sha>/statuses" --jq '[.[] | select(.context == "air-chain/review")][0]'
 ```
 
-- `Needs a person` ends the chain on that commit: neither agent acts until a person sets
-  `Ready for review` again (the command above, `state=pending`).
+- `Needs a person` ends the chain on that commit, and only for what an agent can't decide or
+  do: the loop guard, a person's change request, a blocked merge, checks it can't get green, a
+  fork. The person's next push restarts the chain, as does `Ready for review` set by hand (the
+  command above, `state=pending`). Without `statuses: write` it is a PR comment with the
+  `air-chain` note marker.
 - `air-chain/review` can be a required status check in branch protection: it is green only when
   review-pr approved the head commit.
 - The review itself is a PR review (`event: COMMENT`) with inline comments; its body holds the
@@ -58,9 +69,8 @@ gh api "repos/$repo/commits/<sha>/statuses" --jq '[.[] | select(.context == "air
 
 ## The claim
 
-One verdict starts several address-review runs: the forwarded verdict status, the review's
-`submitted` event, and the run whose re-review produced it (and every reply in a review thread
-fires another `submitted` event). Only one may act, so address-review claims the PR with a PR
+One verdict starts several address-review runs: the forwarded verdict status and the review's
+`submitted` event (and every reply in a review thread fires another `submitted` event). Only one may act, so address-review claims the PR with a PR
 comment ending with `<!-- air-chain claim -->`:
 
 - A run that finds a **live** claim stops with one line. Live: the comment still has the claim
@@ -69,57 +79,67 @@ comment ending with `<!-- air-chain claim -->`:
 - Otherwise the run posts its claim and reads the claims again: two runs can pass the first check
   at once, and the oldest live claim (the lowest comment id) wins; the other edits its own to
   `Stood down` and stops.
-- The owner edits its claim every round (the current head and round), and at the end turns the
-  claim marker into `<!-- air-chain note -->` with the outcome (`Done: merged …`,
-  `Done: Needs a person …`).
+- The owner keeps its claim live while it works, and at the end turns the claim marker into
+  `<!-- air-chain note -->` with the outcome: `Done: merged …`, `Done: addressed <head> in
+  <fix> …` or `Done: Needs a person …`. It releases the claim **before** its fix is pushed, so
+  the review that push starts finds no live claim; the `Done: addressed <head>` note keeps a
+  late run from addressing the same verdict twice.
 - A run that died leaves a claim that goes **stale** after 2 hours; the next trigger takes the PR
-  over and says so in its claim. A person who sees an `Addressing review` comment older than that
-  knows its run is gone, and can restart the chain with `Ready for review`.
+  over and says so in its claim.
 
 The claim is a comment, not a status: it works without `statuses: write`, and a verdict status
 set on the owner's commit doesn't replace it.
 
-**When statuses can't be set.** If setting a status fails with `403 Resource not accessible by
-integration` (the token has no `statuses: write`), the agents go on without it: the review's
-`Verdict:` line carries the verdict, and address-review re-reviews and merges in its own run, so
-the PR still reaches a merge, and the claim still keeps parallel runs out. Only a required
-`air-chain/review` check is lost, and `Needs a person` becomes a PR comment with the `air-chain`
-note marker; say so in the run's summary so a person can grant the permission.
-
 ## Wiring
 
-Air's GitHub triggers don't fire on commit statuses, so
-[.github/workflows/review-chain.yml](../.github/workflows/review-chain.yml) forwards each
-`air-chain/review` status to an automation's webhook trigger, with the JSON payload
-`{"kind": "ready" | "verdict", "repository", "sha", "state", "description", "target_url", "sender"}`.
-The skills find the pull request from `sha`: the open PR whose head it is.
+[.github/workflows/review-chain.yml](../.github/workflows/review-chain.yml) runs
+[review-chain-forward.mjs](../.github/review-chain-forward.mjs) from the default branch on three
+events:
+
+| Event | What the workflow does |
+| --- | --- |
+| A push to a PR (`pull_request_target` `synchronize`; not from a fork) | Sets `pending` `Ready for review` on the new head, and starts its review (below) |
+| A review with a `Verdict:` line on the PR's head, from `jetbrains-air[bot]` or a person with write access (`pull_request_review` `submitted`) | Sets `success` `Verdict: approve` or `failure` `Verdict: need changes` on the head, with the review as `target_url` |
+| An `air-chain/review` status set by a person or an app (`status`) | `Ready for review`: starts the review (below). A verdict: posts it to the Address review webhook, if set |
+
+**Starting the review of a commit** takes one of two routes, never both:
+
+- The Review PR automation's webhook is set (`AIR_REVIEW_WEBHOOK_URL`, `AIR_REVIEW_WEBHOOK_TOKEN`):
+  the workflow posts `{"kind": "ready", "repository", "sha", "state", "description",
+  "target_url", "sender"}` to it. review-pr finds the pull request from `sha`: the open PR whose
+  head it is.
+- It is not set: the workflow posts a review on the commit, as `github-actions[bot]`, that ends
+  with `<!-- air-chain ready -->`. Its `submitted` event starts address-review, which reviews
+  the commit with review-pr (as a separate agent) and then merges or addresses it in the same
+  run. The chain needs no secrets and no webhooks this way.
+
+Statuses the workflow sets with its `GITHUB_TOKEN` start no workflow, so nothing is forwarded
+twice. The `pull_request_review` event runs the workflow file of the PR merged into its base, so a
+PR opened before this workflow gets no status from its reviews; the script always comes from the
+default branch.
 
 | Automation | Instructions | Triggers | Changes |
 | --- | --- | --- | --- |
-| Review PR | `Use the review-pr skill on the pull request from the trigger.` | `GitHub \| Pull request \| Opened`; Webhook | No code changes |
-| Address review | `Use the address-review skill on the pull request from the trigger.` | Webhook; `GitHub \| Pull request review \| Submitted` | As the instructions say |
+| Review PR | `Use the review-pr skill on the pull request from the trigger.` | `GitHub \| Pull request \| Opened`; Webhook (optional) | No code changes |
+| Address review | `Use the address-review skill on the pull request from the trigger.` | `GitHub \| Pull request review \| Submitted`; Webhook (optional) | As the instructions say |
 
 The reviewer automation must use the review-pr skill: a reviewer that posts a review without a
-`Verdict:` line or status leaves address-review nothing to act on.
+`Verdict:` line leaves address-review nothing to act on.
 
-Repository secrets for the workflow, from each webhook trigger's **Copy Webhook URL** and
-**Copy Token**: `AIR_REVIEW_WEBHOOK_URL`, `AIR_REVIEW_WEBHOOK_TOKEN`, `AIR_ADDRESS_WEBHOOK_URL`,
-`AIR_ADDRESS_WEBHOOK_TOKEN`. A missing secret skips that hop with a notice in the workflow log.
-The GitHub app the agents run as needs the `statuses: write` permission. Statuses set with a
-workflow's `GITHUB_TOKEN` start no workflow, so set them as the app or as a person.
+Optional repository secrets, from each webhook trigger's **Copy Webhook URL** and **Copy Token**:
+`AIR_REVIEW_WEBHOOK_URL`, `AIR_REVIEW_WEBHOOK_TOKEN` (re-reviews run in the Review PR automation,
+apart from the author's run), `AIR_ADDRESS_WEBHOOK_URL`, `AIR_ADDRESS_WEBHOOK_TOKEN` (verdict
+statuses set by hand reach address-review). The GitHub app the agents run as needs neither
+`statuses: write` nor the right to push during a run.
 
 ## Loops
 
-- address-review pushes its fix itself, before the run ends, and re-reviews it in the same run:
-  statuses and reviews can only be set on a commit that is on GitHub. Its claim is refreshed
-  with the new commit before it replies in any thread. A push rejected because the branch moved
-  ends the run without a status: the head is then someone else's commit. If an earlier run ended
-  after a fix but before its re-review, the next address-review run sees a head without a verdict
-  after an earlier verdict and re-reviews it, once the dead run's claim is stale.
-
 - address-review hands the PR to a person (`Needs a person`) after 5 `Verdict: need changes`
-  statuses on the PR's commits, or when the reviewer repeats a point it declined with a reason.
-- Both skills are idempotent: a stale trigger (a status on a commit that is no longer the head, or
-  one a newer status replaced) ends the run with one line and nothing set or posted.
+  verdicts on the PR's commits, or when the reviewer repeats a point it declined with a reason.
+- address-review always ends a round with a new commit, an empty one when it declined every
+  finding: the push is what gets the reviewer to read its reasons.
+- Both skills are idempotent: a stale trigger (a status or a review on a commit that is no longer
+  the head, or a verdict already addressed) ends the run with one line and nothing set or posted.
 - One verdict per commit: review-pr checks right before it posts that no other review on the
   commit has a `Verdict:` line, and a run that holds no claim doesn't act on a verdict.
+- A push by a person to a PR in the chain is reviewed like any other: every head gets a verdict.
