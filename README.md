@@ -13,6 +13,9 @@ build-tools-bump-gradle-api — Bumps the Gradle API version that Kotlin Gradle 
 …
 ```
 
+Or in a browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
+for the repository link, its skills and each one's SKILL.md (`--port <port>` for another port).
+
 Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests.
 
 - [spec/](spec/): what it does. [AGENTS.md](AGENTS.md): the definition of done.
