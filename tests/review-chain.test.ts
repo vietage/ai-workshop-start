@@ -126,10 +126,19 @@ test('the statuses the skills set, as their SKILL.md shows them, start the autom
     assert.equal(await forward(state, description), 'Forwarded verdict for 6136092 to the automation.');
     assert.deepEqual(received.map((r) => r.path), ['/address']);
   }
-  assert.deepEqual(statuses('address-review').map(([state]) => state), ['pending', 'error']);
-  const [ready, stop] = statuses('address-review');
-  assert.equal(await forward(...ready), 'Forwarded ready for 6136092 to the automation.');
-  assert.deepEqual(received.map((r) => r.path), ['/review']);
+  // address-review only hands a PR to a person. It sets no "Ready for review" on its own commits, so
+  // its re-review never starts the Review PR automation as a second reviewer of the same commit.
+  assert.deepEqual(statuses('address-review').map(([state]) => state), ['error']);
+  const [stop] = statuses('address-review');
+  assert.match(stop[1], /^Needs a person: /);
   assert.equal(await forward(...stop), 'Not a review chain trigger; nothing to forward.');
   assert.deepEqual(received, []);
+});
+
+test('the claim: a PR comment both skills read the same way, live for 2 hours', () => {
+  const live = 'select((.body | contains("<!-- air-chain claim -->")) and (.updated_at | fromdateiso8601) > now - 7200)';
+  for (const name of ['address-review', 'review-pr']) assert.ok(skill(name).includes(live), `${name} reads claims as live`);
+  // address-review posts its claim as a comment with the marker, not as a commit status.
+  assert.match(skill('address-review'), /issues\/\$pr\/comments" -f body="Addressing review at [^"]*\n\n<!-- air-chain claim -->"/);
+  assert.doesNotMatch(skill('address-review'), /description="Addressing review/);
 });
