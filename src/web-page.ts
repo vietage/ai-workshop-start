@@ -9,6 +9,8 @@ export const PAGE = `<!doctype html>
 <style>
   :root { color-scheme: light dark; --border: #8884; --muted: #888; --accent: #4f7cff; }
   * { box-sizing: border-box; }
+  /* Hidden means not shown, whatever display a rule below gives the element. */
+  [hidden] { display: none !important; }
   body { margin: 0; font: 15px/1.45 system-ui, sans-serif; }
   header { padding: 16px 24px; border-bottom: 1px solid var(--border); }
   h1 { margin: 0 0 10px; font-size: 18px; }
@@ -17,7 +19,6 @@ export const PAGE = `<!doctype html>
   button { padding: 8px 16px; font: inherit; border: 0; border-radius: 6px; background: var(--accent); color: white; cursor: pointer; }
   button:disabled { opacity: .6; cursor: default; }
   #progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: var(--muted); }
-  #progress[hidden] { display: none; }
   #progress-bar { flex: 1; max-width: 420px; height: 8px; accent-color: var(--accent); }
   main { display: grid; grid-template-columns: minmax(260px, 380px) 1fr; min-height: calc(100vh - 100px); }
   #list { border-right: 1px solid var(--border); overflow: auto; }

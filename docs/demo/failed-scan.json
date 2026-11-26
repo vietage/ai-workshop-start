@@ -1,0 +1,18 @@
+{
+  "serve": true,
+  "steps": [
+    { "goto": "/", "pause": 800 },
+    { "caption": "Scan a directory: its skills, the filter and a SKILL.md" },
+    { "type": "#repo", "text": "./fixture", "pause": 300 },
+    { "click": "#scan" },
+    { "waitFor": "#skills li", "pause": 2500 },
+    { "caption": "A directory that does not exist: its message, nothing else" },
+    { "fill": "#repo" },
+    { "type": "#repo", "text": "/no/such/directory", "pause": 300 },
+    { "click": "#scan" },
+    { "waitFor": "#error:not(:empty)", "pause": 3000 },
+    { "caption": "Reload: the same message, for the link in the URL" },
+    { "reload": true },
+    { "waitFor": "#error:not(:empty)", "pause": 3000 }
+  ]
+}

@@ -12,6 +12,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | --- | --- | --- |
 | [word-filter.mp4](word-filter.mp4) | [word-filter.json](word-filter.json) | the filter by several words, [#13](https://github.com/vietage/ai-workshop-start/issues/13) |
 | [scan-progress.mp4](scan-progress.mp4) | [scan-progress.json](scan-progress.json) | the progress bar of an organisation's scan, [#18](https://github.com/vietage/ai-workshop-start/issues/18) |
+| [failed-scan.mp4](failed-scan.mp4) | [failed-scan.json](failed-scan.json) | a failed scan shows its message and nothing else, [#20](https://github.com/vietage/ai-workshop-start/issues/20) |
 
 ## word-filter
 
@@ -39,3 +40,13 @@ The web view on the `Kotlin` organisation, on its default branches (107 reposito
 
 The CLI's bar is drawn only on a terminal ([spec/cli.md](../../spec/cli.md)), which the recorder's
 terminal is not.
+
+## failed-scan
+
+The web view on `./fixture`, then a directory that does not exist:
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `./fixture`, Scan | 4 skills, the filter, the SKILL.md of `code-style`, warnings | a scan that works |
+| `/no/such/directory`, Scan | its message only; the Scan button enabled | a failed scan → its message, nothing else |
+| reload | the same message | the URL keeps the failed link |
