@@ -38,3 +38,10 @@ export function sortSkills(skills: Skill[]): Skill[] {
   const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   return [...skills].sort((a, b) => compare(a.name, b.name) || compare(a.path, b.path));
 }
+
+/** The skills whose name or description contains the word, in any case; all of them without one. */
+export function filterSkills(skills: Skill[], word?: string): Skill[] {
+  if (word === undefined) return skills;
+  const needle = word.toLowerCase();
+  return skills.filter((skill) => [skill.name, skill.description].some((text) => text.toLowerCase().includes(needle)));
+}

@@ -5,6 +5,8 @@ A **GitHub repository** URL, or a local directory
 - `github.com/<owner>/<repo>/tree/<commit or branch>`: that commit
 ## Output
 Every *project skill*: **name**, **description**, **link**
+- A **filter word**, optional: only the skills whose name or description contains it,
+  *case-insensitive*; the count before filtering is kept. Applied after the scan, in the core
 ## Project skill
 A skill that agents load when they work in the repository:
 `<project>/<agent folder>/<skill>/SKILL.md`

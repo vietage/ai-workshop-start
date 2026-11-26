@@ -11,6 +11,7 @@ import { openGitHub, parseGitHubUrl } from '../src/core/github.ts';
 import { parseSkill } from '../src/core/parse.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { scan } from '../src/core/scan.ts';
+import { openDirectory } from '../src/local.ts';
 import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE } from './helpers.ts';
 
 const fixture = await atlas(['scan', FIXTURE]);
@@ -61,6 +62,81 @@ test('./fixture: every project skill, sorted by name, linked to its file, with i
   assert.equal(warnings.length, 2, fixture.stderr);
   assert.match(warnings[0], /^warning: \.agents\/skills\/release-checklist\/SKILL\.md: malformed front matter: /);
   assert.equal(warnings[1], 'warning: .claude/skills/commits/SKILL.md: its copies differ: .github/skills/commits/SKILL.md');
+});
+
+test('--filter: a word in the name → only those skills; the header counts both', async () => {
+  const root = pathToFileURL(FIXTURE).href;
+  const filtered = await atlas(['scan', FIXTURE, '--filter', 'release']);
+  assert.equal(filtered.code, 0, filtered.stderr);
+  assert.equal(filtered.stdout, ['fixture · 1 of 4 skills', 'release-checklist', `  ${root}/.agents/skills/release-checklist/SKILL.md`].join('\n'));
+  // The warnings are those of the whole scan.
+  assert.equal(filtered.stderr, fixture.stderr);
+});
+
+test('--filter: a word in the description, before the URL too', async () => {
+  const root = pathToFileURL(FIXTURE).href;
+  const filtered = await atlas(['scan', '--filter', 'billing', FIXTURE]);
+  assert.equal(filtered.code, 0, filtered.stderr);
+  assert.equal(
+    filtered.stdout,
+    ['fixture · 1 of 4 skills', 'invoices — Create invoices the way the billing module does.', `  ${root}/modules/billing/.claude/skills/invoices/SKILL.md`].join('\n'),
+  );
+});
+
+test('--filter: case-insensitive, over the whole description; sorting, first sentence and copies unchanged', async () => {
+  const root = pathToFileURL(FIXTURE).href;
+  // "Kotlin" is only in code-style's second sentence; "COMMIT" is in commits' name and code-style's "committing".
+  const kotlin = await atlas(['scan', FIXTURE, '--filter', 'KOTLIN']);
+  assert.equal(
+    kotlin.stdout,
+    ['fixture · 1 of 4 skills', "code-style — Follow the project's code style.", `  ${root}/.claude/skills/code-style/SKILL.md`, '  also in .github/skills/code-style/SKILL.md'].join('\n'),
+  );
+  const commit = await atlas(['scan', FIXTURE, '--filter', 'COMMIT']);
+  assert.equal(
+    commit.stdout,
+    [
+      'fixture · 2 of 4 skills',
+      "code-style — Follow the project's code style.",
+      `  ${root}/.claude/skills/code-style/SKILL.md`,
+      '  also in .github/skills/code-style/SKILL.md',
+      'commits — Write commit messages the way this repository does.',
+      `  ${root}/.claude/skills/commits/SKILL.md`,
+      '  also in .github/skills/commits/SKILL.md',
+    ].join('\n'),
+  );
+});
+
+test('--filter: no match → only the header, 0 of N skills, exit code 0, the warnings still on stderr', async () => {
+  const none = await atlas(['scan', FIXTURE, '--filter', 'no-such-word']);
+  assert.equal(none.code, 0);
+  assert.equal(none.stdout, 'fixture · 0 of 4 skills');
+  assert.equal(none.stderr, fixture.stderr);
+  const example = await atlas(['scan', 'github.com/JetBrains/example', '--filter', 'nothing']);
+  assert.equal(example.stdout, 'JetBrains/example · 0 of 1 skill');
+});
+
+test('no --filter: the output is unchanged; the core filters after the scan and keeps the total', async () => {
+  const unfiltered = await atlas(['scan', FIXTURE]);
+  assert.deepEqual(unfiltered, fixture);
+  assert.match(fixture.stdout, /^fixture · 4 skills\n/);
+  const source = await openDirectory(FIXTURE);
+  const all = await scan(source);
+  assert.equal(all.total, 4);
+  assert.equal(all.skills.length, 4);
+  const filtered = await scan(await openDirectory(FIXTURE), { filter: 'Invoices' });
+  assert.equal(filtered.total, 4);
+  assert.deepEqual(filtered.skills.map((skill) => skill.name), ['invoices']);
+  assert.deepEqual(filtered.warnings, all.warnings);
+});
+
+test('--filter without a word, an empty one, or twice → the usage, exit code 1', async () => {
+  const usage = 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <word>]';
+  for (const args of [[FIXTURE, '--filter'], [FIXTURE, '--filter', ''], [FIXTURE, '--filter', 'a', '--filter', 'b']]) {
+    const result = await atlas(['scan', ...args]);
+    assert.equal(result.code, 1, args.join(' '));
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, usage);
+  }
 });
 
 test('the first agent folder in .agents, .claude, .github, agent order is the skill; copies are per project', async (t) => {
