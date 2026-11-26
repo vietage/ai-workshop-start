@@ -13,7 +13,7 @@ export type WebOptions = {
 
 /**
  * The scan as JSON: each skill with its first sentence, its link and its SKILL.md text; with a
- * filter word, only the skills that match it, and `total`, the count before the filter.
+ * filter, only the skills that match every word of it, and `total`, the count before the filter.
  */
 export async function scanJson(input: string, { open }: WebOptions, filter?: string) {
   const source = await open(input);

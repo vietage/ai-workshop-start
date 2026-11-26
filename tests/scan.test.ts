@@ -115,12 +115,46 @@ test('--filter with no match → the header, 0 of N skills, and a clear message;
   assert.deepEqual(github, { code: 0, stdout: 'JetBrains/example · 0 of 1 skill\nno skills match "kotlin"', stderr: '' });
 });
 
-test('--filter without a word, an empty one, twice, or followed by --filter → the usage, exit code 1', async () => {
-  const usage = 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <word>]';
+test('--filter <words>: every word, in the name or the description, in any order', async () => {
+  const names = async (filter: string) => {
+    const result = await atlas(['scan', FIXTURE, '--filter', filter]);
+    assert.equal(result.code, 0, filter);
+    assert.equal(result.stderr, fixture.stderr, filter);
+    return result.stdout.split('\n').filter((line) => !line.startsWith('  '));
+  };
+  // Not the substring "module billing": each word on its own, in any order.
+  assert.deepEqual(await names('module billing'), ['fixture · 1 of 4 skills', 'invoices — Create invoices the way the billing module does.']);
+  // "style" only in the name, "kotlin" only in the description: one in each is enough.
+  assert.deepEqual(await names('kotlin STYLE'), ['fixture · 1 of 4 skills', "code-style — Follow the project's code style."]);
+  // Every word (AND), not any (OR): commits has "commit", but not "kotlin".
+  assert.deepEqual(await names('commit kotlin'), ['fixture · 1 of 4 skills', "code-style — Follow the project's code style."]);
+  assert.deepEqual(await names('commit'), [
+    'fixture · 2 of 4 skills',
+    "code-style — Follow the project's code style.",
+    'commits — Write commit messages the way this repository does.',
+  ]);
+  // Any whitespace between the words, around them, tabs and new lines too.
+  assert.deepEqual(await names(' \tbilling \n  module  '), await names('billing module'));
+  // Quotes are characters like any other: no phrases.
+  assert.deepEqual(await names('"billing module"'), ['fixture · 0 of 4 skills', 'no skills match ""billing module""']);
+});
+
+test('--filter <words> with no match → the words in the message, joined by one space; not an error', async () => {
+  const none = await atlas(['scan', FIXTURE, '--filter', '  commit \t zzz ']);
+  assert.deepEqual(none, { code: 0, stdout: 'fixture · 0 of 4 skills\nno skills match "commit zzz"', stderr: fixture.stderr });
+  const github = await atlas(['scan', '--filter', 'commits kotlin', 'github.com/JetBrains/example']);
+  assert.deepEqual(github, { code: 0, stdout: 'JetBrains/example · 0 of 1 skill\nno skills match "commits kotlin"', stderr: '' });
+  const githubBoth = await atlas(['scan', 'github.com/JetBrains/example', '--filter', 'COMMITS commits']);
+  assert.equal(githubBoth.stdout, example.stdout.replace('· 1 skill', '· 1 of 1 skill'));
+});
+
+test('--filter without words, an empty or blank one, twice, or followed by --filter → the usage, exit code 1', async () => {
+  const usage = 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <words>]';
   for (const args of [
     [FIXTURE, '--filter'],
     [FIXTURE, '--filter', ''],
     [FIXTURE, '--filter', ' '],
+    [FIXTURE, '--filter', ' \t\n '],
     [FIXTURE, '--filter', 'a', '--filter', 'b'],
     ['--filter', '--filter', FIXTURE],
     [FIXTURE, FIXTURE, '--filter', 'a'],
@@ -137,6 +171,11 @@ test('the core: the filter after the scan, and the count before it', async () =>
   assert.equal(filtered.total, 4);
   assert.deepEqual(filtered.skills.map((skill) => skill.name), ['invoices']);
   assert.deepEqual(filtered.warnings, all.warnings);
+  const words = await scan(await openDirectory(FIXTURE), { filter: ' module  INVOICES ' });
+  assert.equal(words.total, 4);
+  assert.deepEqual(words.skills.map((skill) => skill.name), ['invoices']);
+  // No words: no filter.
+  assert.deepEqual((await scan(await openDirectory(FIXTURE), { filter: ' \t ' })).skills, all.skills);
 });
 
 test('the first agent folder in .agents, .claude, .github, agent order is the skill; copies are per project', async (t) => {
