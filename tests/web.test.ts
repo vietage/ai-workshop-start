@@ -223,8 +223,15 @@ async function page(path: string, at = port) {
     $('filter').dispatchEvent(new dom.window.Event('input'));
   };
   const names = () => items().map((item) => text(item, '.name'));
+  /** Whether the page's style shows the element: it and every parent not `display: none`. */
+  const shown = (id: string) => {
+    for (let node: Element | null = $(id); node; node = node.parentElement) {
+      if (dom.window.getComputedStyle(node).display === 'none') return false;
+    }
+    return true;
+  };
   const selected = () => items().find((item) => item.getAttribute('aria-selected') === 'true')?.dataset.path;
-  return { dom, $, settled, enter, items, text, search, filter, names, selected, scans: () => scans, close: () => dom.window.close() };
+  return { dom, $, settled, enter, items, text, search, filter, names, selected, shown, scans: () => scans, close: () => dom.window.close() };
 }
 
 test('page: a GitHub repository → <owner>/<repo> · N skills and its commit', { timeout: 5_000 }, async () => {
@@ -297,6 +304,24 @@ test('page: warnings, under the skills; a failed scan → its message, nothing e
     await view.enter('/no/such/directory');
     assert.equal(view.$('error').textContent, 'Not a GitHub URL or a readable directory: /no/such/directory');
     assert.equal(view.$('main').hidden, true);
+    // Hidden as the page's style shows it, too: no rule for main may show it again.
+    assert.equal(view.shown('main'), false);
+    assert.equal(view.shown('error'), true);
+    assert.equal(view.shown('organisation'), false);
+    assert.equal(view.shown('progress'), false);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: whatever is hidden is not shown, whatever its own style', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    for (const element of view.dom.window.document.querySelectorAll('body *')) {
+      (element as HTMLElement).hidden = true;
+      assert.equal(view.dom.window.getComputedStyle(element).display, 'none', element.outerHTML.slice(0, 60));
+      (element as HTMLElement).hidden = false;
+    }
   } finally {
     view.close();
   }
@@ -331,6 +356,7 @@ test('page: the URL keeps the link and the skill; reload shows the same', { time
     await failed.settled(1);
     assert.equal(failed.$('error').textContent, 'Not a GitHub URL or a readable directory: /no/such/directory');
     assert.equal(failed.$('main').hidden, true);
+    assert.equal(failed.shown('main'), false);
   } finally {
     failed.close();
   }
@@ -534,30 +560,29 @@ test('page: the URL keeps the words; reload shows the same', { timeout: 5_000 },
   }
 });
 
-test('page: after a failed scan, changing the filter still updates the URL', { timeout: 5_000 }, async () => {
+test('page: a failed scan keeps filter= in the URL, the filter hidden; a reload restores its words', { timeout: 5_000 }, async () => {
   const view = await page('/');
   let href: string;
   try {
     await view.enter(FIXTURE);
-    view.filter('zzz');
+    view.filter('commit');
     await view.enter('/no/such/directory');
-    view.filter('commit');
     assert.deepEqual(view.search(), { repo: '/no/such/directory', filter: 'commit' });
-    // Cleared: the filter leaves the URL, the failed link stays.
-    view.filter('');
-    assert.deepEqual(view.search(), { repo: '/no/such/directory' });
-    view.filter('commit');
+    // The filter is hidden with the skills: a user can't change it until a scan succeeds.
+    assert.equal(view.shown('filter'), false);
     href = view.dom.window.location.href;
   } finally {
     view.close();
   }
-  // A reload brings back the word in the field, and the failed scan's message.
+  // A reload brings back the words in the field, still hidden, and the failed scan's message.
   const reloaded = await page(new URL(href).pathname + new URL(href).search);
   try {
     await reloaded.settled(1);
     assert.equal((reloaded.$('filter') as HTMLInputElement).value, 'commit');
     assert.equal(reloaded.$('error').textContent, 'Not a GitHub URL or a readable directory: /no/such/directory');
     assert.equal(reloaded.$('main').hidden, true);
+    assert.equal(reloaded.shown('filter'), false);
+    assert.equal(reloaded.shown('error'), true);
   } finally {
     reloaded.close();
   }

@@ -29,7 +29,8 @@
 - The page's URL keeps the link, the skill and the filter: `?repo=<link>&skill=<path>&filter=<words>`,
   the words joined by one space;
   reload shows the same, a failed scan's message too
-  - After a failed scan, changing the filter still updates `filter=`, with the failed link
+  - A failed scan keeps `filter=` in the URL, with the failed link; the filter is hidden with the
+    skills, and a reload restores its words
   - An organisation: `?repo=github.com/<org>&repository=<name>&skill=<path>&filter=<words>`
 ## API
 `GET /api/scan?repo=<link>[&filter=<words>]` → JSON: `repository`, `skills` (each with its `link`
