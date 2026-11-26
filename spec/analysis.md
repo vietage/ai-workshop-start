@@ -58,6 +58,9 @@ Skill: id = `repo:path`, name, description, commit, copies
   not JSON, an unexpected one) → a *warning*, `<repo>: not scanned: <message>`; the scan goes on;
   it is listed **last**, with *no count* and no commit
 - An empty repository → *0 skills*, no warning
+- **Progress**: `scanned` of `total` repositories, the archived ones and forks not counted; *0 of N*
+  once listed, then one more as each repository is done, whatever its outcome, the failed ones too;
+  nothing before the list (an unknown organisation)
 - *8 repositories* at a time; no time budget: JetBrains, 549 repositories, in about a minute with
   `GITHUB_TOKEN`
 - No filter: it is for one repository

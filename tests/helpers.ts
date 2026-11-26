@@ -2,7 +2,7 @@
 import { fileURLToPath } from 'node:url';
 import { run } from '../src/commands.ts';
 import { openGitHub, parseGitHubUrl } from '../src/core/github.ts';
-import { scanOrganisation as scanOwner } from '../src/core/organisation.ts';
+import { scanOrganisation as scanOwner, type Progress } from '../src/core/organisation.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { openDirectory } from '../src/local.ts';
 
@@ -90,7 +90,11 @@ const ORGANISATION: Recording = (() => {
   return recording;
 })();
 
-const github = replay({ ...EXAMPLE, ...ORGANISATION });
+/** GitHub, answering from EXAMPLE and ORGANISATION. */
+export const github = replay({ ...EXAMPLE, ...ORGANISATION });
+
+/** Preloaded into the real CLI (`node --import`): GitHub answers from the recordings; with `TERMINAL=1`, stderr is a terminal. */
+export const TERMINAL = new URL('./terminal.ts', import.meta.url).href;
 
 /** Opens a GitHub URL or a directory as the CLI does, with GitHub answering from EXAMPLE. */
 export const open = (input: string) =>
@@ -98,17 +102,22 @@ export const open = (input: string) =>
   parseGitHubUrl(input) ? openGitHub(input, { fetch: github, token: 'test' }) : openDirectory(input);
 
 /** Scans an organisation as the CLI does, with GitHub answering from ORGANISATION; with a token, which is never used to search. */
-export const scanOrganisation = (input: string) => scanOwner(input, { fetch: github, token: 'test' });
+export const scanOrganisation = (input: string, progress?: Progress) => scanOwner(input, { fetch: github, token: 'test', progress });
 
-/** `skill-atlas <args>`, as the CLI runs it, with GitHub answering from EXAMPLE. */
-export async function atlas(args: string[]) {
+/**
+ * `skill-atlas <args>`, as the CLI runs it, with GitHub answering from EXAMPLE; with `terminal`,
+ * as on a terminal: `progress` has what the progress bar showed, and `hidden` once it was hidden.
+ */
+export async function atlas(args: string[], { terminal = false, scan = scanOrganisation } = {}) {
   const stdout: string[] = [];
   const stderr: string[] = [];
+  const progress: string[] = [];
   const code = await run(args, {
     open,
-    scanOrganisation,
+    scanOrganisation: scan,
     print: (text) => stdout.push(text),
     error: (text) => stderr.push(text),
+    progress: terminal ? { show: (line) => progress.push(line), hide: () => progress.push('hidden') } : undefined,
   });
-  return { code, stdout: stdout.join('\n'), stderr: stderr.join('\n') };
+  return { code, stdout: stdout.join('\n'), stderr: stderr.join('\n'), ...(terminal ? { progress } : {}) };
 }

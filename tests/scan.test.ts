@@ -7,14 +7,15 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { run } from '../src/commands.ts';
+import { progressBar, run } from '../src/commands.ts';
 import { openGitHub, parseGitHubOwner, parseGitHubUrl } from '../src/core/github.ts';
+import { AtlasError } from '../src/core/errors.ts';
 import { scanOrganisation } from '../src/core/organisation.ts';
 import { parseSkill } from '../src/core/parse.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { scan } from '../src/core/scan.ts';
 import { openDirectory } from '../src/local.ts';
-import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, ORGANISATION_COMMIT, scanOrganisation as scanRecorded } from './helpers.ts';
+import { atlas, CLI, TERMINAL, EXAMPLE_COMMIT, FIXTURE, ORGANISATION_COMMIT, scanOrganisation as scanRecorded } from './helpers.ts';
 
 const fixture = await atlas(['scan', FIXTURE]);
 const example = await atlas(['scan', 'github.com/JetBrains/example']);
@@ -577,4 +578,88 @@ test('organisation: an empty repository, without a commit → 0 skills, no warni
     stdout: '',
     stderr: 'Repository is empty: https://github.com/SkillAtlas/empty',
   });
+});
+
+test('organisation: progress → 0 of the total once listed, then one more as each repository is done, the failed ones too', async () => {
+  const seen: [number, number][] = [];
+  const result = await scanRecorded('github.com/skillatlas', (scanned, total) => seen.push([scanned, total]));
+  assert.equal(result.repositories.length, 7);
+  assert.deepEqual(seen, [0, 1, 2, 3, 4, 5, 6, 7].map((scanned) => [scanned, 7]));
+  // No repositories: 0 of 0.
+  const none: [number, number][] = [];
+  await scanOrganisation('github.com/nobody', {
+    fetch: async (url) => (url.endsWith('/users/nobody') ? Response.json({ login: 'nobody', type: 'User' }) : Response.json([])),
+    progress: (scanned, total) => none.push([scanned, total]),
+  });
+  assert.deepEqual(none, [[0, 0]]);
+});
+
+test('organisation on a terminal: a progress bar, scanned/total repositories, hidden before the result is printed', async () => {
+  const scanned = await atlas(['scan', 'github.com/skillatlas'], { terminal: true });
+  assert.equal(scanned.code, 0);
+  assert.deepEqual(scanned.progress, [
+    '[--------------------] 0/7 repositories',
+    '[##------------------] 1/7 repositories',
+    '[#####---------------] 2/7 repositories',
+    '[########------------] 3/7 repositories',
+    '[###########---------] 4/7 repositories',
+    '[##############------] 5/7 repositories',
+    '[#################---] 6/7 repositories',
+    '[####################] 7/7 repositories',
+    'hidden',
+  ]);
+  // The output itself is the same as without a terminal.
+  const piped = await atlas(['scan', 'github.com/skillatlas']);
+  assert.deepEqual({ ...scanned, progress: undefined }, { ...piped, progress: undefined });
+  assert.equal(piped.progress, undefined);
+});
+
+test('organisation on a terminal: the progress bar is hidden when the scan fails', async () => {
+  // Unknown: it fails before the repositories are listed.
+  const unknown = await atlas(['scan', 'github.com/no-such-organisation'], { terminal: true });
+  assert.equal(unknown.code, 1);
+  assert.deepEqual(unknown.progress, ['hidden']);
+  // Fails while it runs, after some progress.
+  const failing = await atlas(['scan', 'github.com/skillatlas'], {
+    terminal: true,
+    scan: async (_input, progress) => {
+      progress?.(0, 3);
+      progress?.(1, 3);
+      throw new AtlasError('Cannot reach GitHub: connection reset');
+    },
+  });
+  assert.deepEqual(failing, {
+    code: 1,
+    stdout: '',
+    stderr: 'Cannot reach GitHub: connection reset',
+    progress: ['[--------------------] 0/3 repositories', '[######--------------] 1/3 repositories', 'hidden'],
+  });
+});
+
+test('progress bar: filled in proportion, 1 repository, and full for 0 of 0', () => {
+  assert.equal(progressBar(0, 549), '[--------------------] 0/549 repositories');
+  assert.equal(progressBar(275, 549), '[##########----------] 275/549 repositories');
+  assert.equal(progressBar(1, 1), '[####################] 1/1 repository');
+  assert.equal(progressBar(0, 0), '[####################] 0/0 repositories');
+});
+
+test('./skill-atlas scan github.com/<org>: on a terminal, the bar redrawn on one line on stderr, then erased; piped, none', () => {
+  // The real CLI, GitHub answered from the recordings; `TERMINAL=1`: stderr is a terminal.
+  const cli = (terminal: boolean) =>
+    spawnSync(process.execPath, ['--import', TERMINAL, CLI, 'scan', 'github.com/skillatlas'], {
+      encoding: 'utf8',
+      env: { ...process.env, TERMINAL: terminal ? '1' : '' },
+    });
+  const piped = cli(false);
+  assert.equal(piped.status, 0, piped.stderr);
+  assert.ok(!piped.stderr.includes('\r'));
+  assert.ok(!piped.stderr.includes('/7 repositories'));
+  const terminal = cli(true);
+  assert.equal(terminal.status, 0, terminal.stderr);
+  assert.equal(terminal.stdout, piped.stdout);
+  const erase = '\r\x1b[K';
+  assert.ok(terminal.stderr.startsWith(`${erase}[--------------------] 0/7 repositories${erase}`), JSON.stringify(terminal.stderr));
+  assert.ok(terminal.stderr.includes(`${erase}[####################] 7/7 repositories${erase}warning: `), JSON.stringify(terminal.stderr));
+  // Once erased, the warnings as without a terminal.
+  assert.equal(terminal.stderr.slice(terminal.stderr.lastIndexOf(erase) + erase.length), piped.stderr);
 });

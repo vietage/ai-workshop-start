@@ -4,25 +4,25 @@ import { createServer, type Server } from 'node:http';
 import { AtlasError } from './core/errors.ts';
 import { parseGitHubOwner } from './core/github.ts';
 import { firstSentence, skillLink } from './core/model.ts';
-import type { OrganisationResult } from './core/organisation.ts';
+import type { OrganisationResult, Progress } from './core/organisation.ts';
 import { scan, type Source } from './core/scan.ts';
 import { PAGE } from './web-page.ts';
 
 export type WebOptions = {
   /** Opens what the user asked to scan, as the CLI does. */
   open(input: string): Promise<Source>;
-  /** Scans every repository of a GitHub organisation, as the CLI does. */
-  scanOrganisation(input: string): Promise<OrganisationResult>;
+  /** Scans every repository of a GitHub organisation, as the CLI does; `progress` as each one is done. */
+  scanOrganisation(input: string, progress?: Progress): Promise<OrganisationResult>;
 };
 
 /**
  * The scan as JSON: each skill with its first sentence, its link and its SKILL.md text; with a
  * filter, only the skills that match every word of it, and `total`, the count before the filter.
  */
-export async function scanJson(input: string, { open, scanOrganisation }: WebOptions, filter?: string) {
+export async function scanJson(input: string, { open, scanOrganisation }: WebOptions, filter?: string, progress?: Progress) {
   if (parseGitHubOwner(input)) {
     if (filter) throw new AtlasError('filter works on one repository, not on an organisation');
-    return organisationJson(await scanOrganisation(input));
+    return organisationJson(await scanOrganisation(input, progress));
   }
   const source = await open(input);
   // Each file is read once: the text shown is the text the scan parsed.
@@ -78,11 +78,28 @@ export function createWebServer(options: WebOptions): Server {
     const repo = url.searchParams.get('repo')?.trim();
     if (!repo) return json(400, { error: 'Enter a GitHub URL or a directory' });
     const filter = url.searchParams.get('filter')?.trim() || undefined;
+    // stream=1: one JSON object a line, `{ progress }` as an organisation's repositories are done,
+    // then `{ result }`, or `{ error }` once the lines have started; before that, as without it.
+    let started = false;
+    const line = (body: unknown) => {
+      if (!started) response.writeHead(200, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store' });
+      started = true;
+      response.write(JSON.stringify(body) + '\n');
+    };
+    const stream = url.searchParams.get('stream') === '1';
+    const progress = stream ? (scanned: number, total: number) => line({ progress: { scanned, total } }) : undefined;
     try {
-      json(200, await scanJson(repo, options, filter));
+      const result = await scanJson(repo, options, filter, progress);
+      if (!stream) return json(200, result);
+      line({ result });
+      response.end();
     } catch (error) {
-      if (error instanceof AtlasError) return json(400, { error: error.message });
-      json(500, { error: `Unexpected error: ${error instanceof Error ? error.message : String(error)}` });
+      const message = error instanceof AtlasError ? error.message : `Unexpected error: ${error instanceof Error ? error.message : String(error)}`;
+      if (started) {
+        line({ error: message });
+        return response.end();
+      }
+      json(error instanceof AtlasError ? 400 : 500, { error: message });
     }
   });
 }

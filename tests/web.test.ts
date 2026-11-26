@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { after, test } from 'node:test';
 import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, open, ORGANISATION_COMMIT, scanOrganisation } from './helpers.ts';
-import { serve } from '../src/web.ts';
+import { serve, type WebOptions } from '../src/web.ts';
+import { AtlasError } from '../src/core/errors.ts';
 
 const { server, url } = await serve({ open, scanOrganisation, port: 0 });
 after(() => server.close());
@@ -185,18 +186,20 @@ test('./skill-atlas serve stops with Ctrl+C', { timeout: 10_000 }, async () => {
   assert.equal(await exit, 'SIGINT');
 });
 
-// The page, its own script run in jsdom against the server above.
-async function page(path: string) {
+// The page, its own script run in jsdom against the server above, or the one on `at`.
+async function page(path: string, at = port) {
   const { JSDOM } = await import('jsdom');
   let scans = 0;
   const dom = new JSDOM((await get('/')).text, {
-    url: `http://localhost:${port}${path}`,
+    url: `http://localhost:${at}${path}`,
     runScripts: 'dangerously',
     beforeParse(window) {
       window.fetch = ((input: string) => {
         scans++;
-        return fetch(new URL(input, `http://127.0.0.1:${port}`));
+        return fetch(new URL(input, `http://127.0.0.1:${at}`));
       }) as typeof fetch;
+      // As in a browser: jsdom has no TextDecoder of its own.
+      (window as unknown as { TextDecoder: typeof TextDecoder }).TextDecoder = TextDecoder;
     },
   });
   const document = dom.window.document;
@@ -716,5 +719,155 @@ test('page: an unknown organisation → its message, nothing else', { timeout: 5
     assert.equal(view.$('main').hidden, true);
   } finally {
     view.close();
+  }
+});
+
+/** `GET /api/scan?stream=1&repo=<link>` on the server at `at`: its status, type, and each line parsed. */
+async function streamed(repo: string, at = port) {
+  const response = await fetch(`http://127.0.0.1:${at}/api/scan?stream=1&repo=${encodeURIComponent(repo)}`);
+  const text = await response.text();
+  const type = response.headers.get('content-type');
+  return { status: response.status, type, lines: type?.startsWith('application/x-ndjson') ? text.split('\n').filter(Boolean).map((line) => JSON.parse(line)) : JSON.parse(text) };
+}
+
+/**
+ * A server whose organisation scan stops after `scanned` of `total` repositories, until `finish`
+ * lets it end with the recorded result, or `fail` with an error.
+ */
+async function stoppedServer(scanned: number, total: number) {
+  let finish!: () => void;
+  let fail!: (error: Error) => void;
+  const gate = new Promise<void>((resolve, reject) => ((finish = resolve), (fail = reject)));
+  let reached!: () => void;
+  const stopped = new Promise<void>((resolve) => (reached = resolve));
+  const options: WebOptions = {
+    open,
+    async scanOrganisation(input, progress) {
+      for (let done = 0; done <= scanned; done++) progress?.(done, total);
+      reached();
+      await gate;
+      for (let done = scanned + 1; done <= total; done++) progress?.(done, total);
+      return scanOrganisation(input);
+    },
+  };
+  const { server, url } = await serve({ ...options, port: 0 });
+  return { port: new URL(url).port, stopped, finish, fail, close: () => server.close() };
+}
+
+test('API: stream=1, an organisation → a line per repository done, 0 of N first, then the same JSON as without it', async () => {
+  const { status, type, lines } = await streamed('github.com/skillatlas');
+  assert.equal(status, 200);
+  assert.equal(type, 'application/x-ndjson; charset=utf-8');
+  assert.deepEqual(lines.slice(0, -1), [0, 1, 2, 3, 4, 5, 6, 7].map((scanned) => ({ progress: { scanned, total: 7 } })));
+  assert.deepEqual(lines.at(-1), { result: (await scan('github.com/skillatlas')).body });
+  // One repository: only its answer.
+  const repository = await streamed('https://github.com/JetBrains/example');
+  assert.deepEqual(repository.lines, [{ result: (await scan('https://github.com/JetBrains/example')).body }]);
+});
+
+test('API: stream=1, a scan that fails before any progress → 400 and its message, as without it', async () => {
+  assert.deepEqual(await streamed('github.com/no-such-organisation'), {
+    status: 400,
+    type: 'application/json; charset=utf-8',
+    lines: { error: 'Organisation not found: https://github.com/no-such-organisation' },
+  });
+});
+
+test('API: stream=1, a scan that fails after some progress → its message, the last line', async () => {
+  const stopped = await stoppedServer(1, 3);
+  try {
+    const answer = streamed('github.com/skillatlas', stopped.port);
+    await stopped.stopped;
+    stopped.fail(new AtlasError('Cannot reach GitHub: connection reset'));
+    assert.deepEqual((await answer).lines, [
+      { progress: { scanned: 0, total: 3 } },
+      { progress: { scanned: 1, total: 3 } },
+      { error: 'Cannot reach GitHub: connection reset' },
+    ]);
+  } finally {
+    stopped.close();
+  }
+});
+
+test('page: an organisation scanning → a progress bar, N of M repositories scanned; hidden once it is done', { timeout: 5_000 }, async () => {
+  const stopped = await stoppedServer(2, 7);
+  const view = await page('/', stopped.port);
+  try {
+    assert.equal(view.$('progress').hidden, true);
+    (view.$('repo') as HTMLInputElement).value = 'github.com/skillatlas';
+    view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+    await stopped.stopped;
+    // The lines arrive as they are written: wait for the page to show the last one.
+    while (view.$('progress-text').textContent !== '2 of 7 repositories scanned') await new Promise((r) => setTimeout(r, 10));
+    assert.equal(view.$('progress').hidden, false);
+    const bar = view.$('progress-bar') as HTMLProgressElement;
+    assert.deepEqual([bar.value, bar.max], [2, 7]);
+    assert.equal((view.$('scan') as HTMLButtonElement).disabled, true);
+    stopped.finish();
+    await view.settled(1);
+    assert.equal(view.$('progress').hidden, true);
+    assert.equal(view.$('org-summary').textContent, 'SkillAtlas · 7 repositories · 6 skills');
+    // A repository of it selected: no progress bar.
+    const repositories = [...view.$('repositories').children] as HTMLElement[];
+    repositories[0].dispatchEvent(new view.dom.window.Event('click'));
+    assert.equal(view.$('progress').hidden, true);
+    await view.settled(2);
+    assert.equal(view.$('progress').hidden, true);
+  } finally {
+    view.close();
+    stopped.close();
+  }
+});
+
+test('page: an organisation scan that fails → the progress bar hidden, its message', { timeout: 5_000 }, async () => {
+  const stopped = await stoppedServer(1, 3);
+  const view = await page('/', stopped.port);
+  try {
+    (view.$('repo') as HTMLInputElement).value = 'github.com/skillatlas';
+    view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+    await stopped.stopped;
+    while (view.$('progress-text').textContent !== '1 of 3 repositories scanned') await new Promise((r) => setTimeout(r, 10));
+    assert.equal(view.$('progress').hidden, false);
+    stopped.fail(new AtlasError('Cannot reach GitHub: connection reset'));
+    await view.settled(1);
+    assert.equal(view.$('progress').hidden, true);
+    assert.equal(view.$('error').textContent, 'Cannot reach GitHub: connection reset');
+    assert.equal(view.$('organisation').hidden, true);
+    assert.equal(view.$('main').hidden, true);
+  } finally {
+    view.close();
+    stopped.close();
+  }
+  // Unknown: fails before any progress; no progress bar.
+  const unknown = await page('/');
+  try {
+    await unknown.enter('github.com/no-such-organisation');
+    assert.equal(unknown.$('progress').hidden, true);
+    assert.equal(unknown.$('error').textContent, 'Organisation not found: https://github.com/no-such-organisation');
+  } finally {
+    unknown.close();
+  }
+});
+
+test('page: another link entered while an organisation is scanned → its progress no longer shown', { timeout: 5_000 }, async () => {
+  const stopped = await stoppedServer(1, 3);
+  const view = await page('/', stopped.port);
+  try {
+    (view.$('repo') as HTMLInputElement).value = 'github.com/skillatlas';
+    view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+    await stopped.stopped;
+    while (view.$('progress').hidden) await new Promise((r) => setTimeout(r, 10));
+    (view.$('repo') as HTMLInputElement).value = 'https://github.com/JetBrains/example';
+    view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+    assert.equal(view.$('progress').hidden, true);
+    while (view.$('main').hidden) await new Promise((r) => setTimeout(r, 10));
+    stopped.finish();
+    await view.settled(2);
+    assert.equal(view.$('progress').hidden, true);
+    assert.equal(view.$('organisation').hidden, true);
+    assert.equal(view.$('summary').textContent, `JetBrains/example · 1 skill · ${EXAMPLE_COMMIT.slice(0, 12)}`);
+  } finally {
+    view.close();
+    stopped.close();
   }
 });

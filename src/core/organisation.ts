@@ -1,5 +1,5 @@
 import { AtlasError, EmptyRepository } from './errors.ts';
-import { listRepositories, openListed, type GitHubOptions } from './github.ts';
+import { listRepositories, openListed, type GitHubOptions, type ListedRepository } from './github.ts';
 import { scan } from './scan.ts';
 
 /** One repository of a scanned organisation: no commit or count when its scan failed. */
@@ -22,9 +22,14 @@ export type OrganisationResult = {
   warnings: string[];
 };
 
+/** How far a scan of an organisation has gone: `scanned` of its `total` repositories. */
+export type Progress = (scanned: number, total: number) => void;
+
 export type OrganisationOptions = GitHubOptions & {
   /** How many repositories are scanned at the same time. */
   concurrency?: number;
+  /** Called with 0 once the repositories are listed, then each time one is done, whatever its outcome. */
+  progress?: Progress;
 };
 
 /**
@@ -34,19 +39,13 @@ export type OrganisationOptions = GitHubOptions & {
  */
 export async function scanOrganisation(input: string, options: OrganisationOptions): Promise<OrganisationResult> {
   const owner = await listRepositories(input, options);
+  const total = owner.repositories.length;
+  let scanned = 0;
+  options.progress?.(0, total);
   const results = await pool(owner.repositories, options.concurrency ?? 8, async (listed) => {
-    const url = `https://github.com/${listed.id}`;
-    try {
-      const result = await scan(await openListed(listed, options));
-      const warnings = result.warnings.map((warning) => `${listed.name}: ${warning}`);
-      return { repository: { name: listed.name, url, commit: result.repository.commit, skillCount: result.total }, warnings };
-    } catch (error) {
-      // No commit: no files, so no skills.
-      if (error instanceof EmptyRepository) return { repository: { name: listed.name, url, skillCount: 0 }, warnings: [] };
-      // Whatever the error, the other repositories are still scanned.
-      const message = error instanceof AtlasError ? error.message : `Unexpected error: ${describe(error)}`;
-      return { repository: { name: listed.name, url }, warnings: [`${listed.name}: not scanned: ${message}`] };
-    }
+    const result = await scanListed(listed, options);
+    options.progress?.(++scanned, total);
+    return result;
   });
   const repositories = sortRepositories(results.map((result) => result.repository));
   return {
@@ -58,6 +57,22 @@ export async function scanOrganisation(input: string, options: OrganisationOptio
       .sort((a, b) => repositories.indexOf(a.repository) - repositories.indexOf(b.repository))
       .flatMap((result) => result.warnings),
   };
+}
+
+/** One repository of the organisation, on its default branch; never throws: a failure is a warning. */
+async function scanListed(listed: ListedRepository, options: GitHubOptions): Promise<{ repository: OrganisationRepository; warnings: string[] }> {
+  const url = `https://github.com/${listed.id}`;
+  try {
+    const result = await scan(await openListed(listed, options));
+    const warnings = result.warnings.map((warning) => `${listed.name}: ${warning}`);
+    return { repository: { name: listed.name, url, commit: result.repository.commit, skillCount: result.total }, warnings };
+  } catch (error) {
+    // No commit: no files, so no skills.
+    if (error instanceof EmptyRepository) return { repository: { name: listed.name, url, skillCount: 0 }, warnings: [] };
+    // Whatever the error, the other repositories are still scanned.
+    const message = error instanceof AtlasError ? error.message : `Unexpected error: ${describe(error)}`;
+    return { repository: { name: listed.name, url }, warnings: [`${listed.name}: not scanned: ${message}`] };
+  }
 }
 
 function describe(error: unknown): string {
