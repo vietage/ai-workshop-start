@@ -1,5 +1,5 @@
 import { findSkills, type SkillFile } from './find.ts';
-import { sortSkills, type Repository, type Skill } from './model.ts';
+import { filterSkills, sortSkills, type Repository, type Skill } from './model.ts';
 import { parseSkill } from './parse.ts';
 
 /** A repository to scan: its files, and how to read them. */
@@ -13,16 +13,29 @@ export type Source = {
   read(path: string): Promise<Uint8Array | undefined>;
 };
 
-export type ScanResult = { repository: Repository; skills: Skill[]; warnings: string[] };
+export type ScanOptions = {
+  /** Only the skills whose name or description contains it, in any case. */
+  filter?: string;
+};
 
-/** fetch → find → parse. Nothing is stored: the result is all there is. */
-export async function scan(source: Source): Promise<ScanResult> {
+export type ScanResult = {
+  repository: Repository;
+  skills: Skill[];
+  /** How many skills the repository has, before the filter. */
+  total: number;
+  warnings: string[];
+};
+
+/** fetch → find → parse, then the filter. Nothing is stored: the result is all there is. */
+export async function scan(source: Source, options: ScanOptions = {}): Promise<ScanResult> {
   const files = findSkills(source.paths);
   // The files are read at the same time: on GitHub, each one is a request.
   const results = await Promise.all(files.map((file) => readSkill(source, file)));
+  const skills = sortSkills(results.flatMap((result) => (result.skill ? [result.skill] : [])));
   return {
     repository: source.repository,
-    skills: sortSkills(results.flatMap((result) => (result.skill ? [result.skill] : []))),
+    skills: filterSkills(skills, options.filter),
+    total: skills.length,
     warnings: [...source.warnings, ...results.flatMap((result) => result.warnings)],
   };
 }

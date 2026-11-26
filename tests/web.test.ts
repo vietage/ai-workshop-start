@@ -18,8 +18,9 @@ async function get(path: string) {
   const response = await fetch(`http://127.0.0.1:${port}${path}`);
   return { status: response.status, type: response.headers.get('content-type'), text: await response.text() };
 }
-const scan = async (repo: string) => {
-  const response = await get(`/api/scan?repo=${encodeURIComponent(repo)}`);
+const scan = async (repo: string, filter?: string) => {
+  const query = filter === undefined ? '' : `&filter=${encodeURIComponent(filter)}`;
+  const response = await get(`/api/scan?repo=${encodeURIComponent(repo)}${query}`);
   return { status: response.status, body: JSON.parse(response.text) };
 };
 
@@ -76,6 +77,23 @@ test('API: a local directory → the same skills as the CLI, sorted by name, wit
     assert.equal(skill.content, readFileSync(join(FIXTURE, skill.path), 'utf8'), skill.path);
   }
   assert.deepEqual(body.warnings.map((warning: string) => `warning: ${warning}`), cli.stderr.split('\n'));
+});
+
+test('API: &filter=<word> → only the skills that match, as --filter, and the count before it', async () => {
+  const all = await scan(FIXTURE);
+  assert.equal(all.body.total, 4);
+  const commit = await scan(FIXTURE, 'COMMIT');
+  assert.equal(commit.status, 200);
+  assert.deepEqual(commit.body.skills.map((skill: { name: string }) => skill.name), ['code-style', 'commits']);
+  assert.equal(commit.body.total, 4);
+  assert.deepEqual(commit.body.warnings, all.body.warnings);
+  assert.deepEqual(commit.body.skills[1], all.body.skills[1]);
+  const none = await scan(FIXTURE, 'zzz');
+  assert.equal(none.status, 200);
+  assert.deepEqual(none.body.skills, []);
+  assert.equal(none.body.total, 4);
+  // An empty word: no filter.
+  assert.deepEqual((await scan(FIXTURE, ' ')).body, all.body);
 });
 
 test('API: no link, or a scan that fails → 400 and its message', async () => {
@@ -180,7 +198,14 @@ async function page(path: string) {
   const items = () => [...$('skills').children] as HTMLElement[];
   const text = (node: Element, selector: string) => node.querySelector(selector)?.textContent;
   const search = () => Object.fromEntries(new URLSearchParams(dom.window.location.search));
-  return { dom, $, settled, enter, items, text, search, close: () => dom.window.close() };
+  /** Types into the filter field, as a user does. */
+  const filter = (word: string) => {
+    ($('filter') as HTMLInputElement).value = word;
+    $('filter').dispatchEvent(new dom.window.Event('input'));
+  };
+  const names = () => items().map((item) => text(item, '.name'));
+  const selected = () => items().find((item) => item.getAttribute('aria-selected') === 'true')?.dataset.path;
+  return { dom, $, settled, enter, items, text, search, filter, names, selected, scans: () => scans, close: () => dom.window.close() };
 }
 
 test('page: a GitHub repository → <owner>/<repo> · N skills and its commit', { timeout: 5_000 }, async () => {
@@ -289,5 +314,126 @@ test('page: the URL keeps the link and the skill; reload shows the same', { time
     assert.equal(failed.$('main').hidden, true);
   } finally {
     failed.close();
+  }
+});
+
+test('page: a filter field above the skills; typing narrows them, without scanning again', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    const filter = view.$('filter') as HTMLInputElement;
+    assert.equal(filter.closest('#list'), view.$('list'));
+    assert.ok(filter.compareDocumentPosition(view.$('skills')) & view.dom.window.Node.DOCUMENT_POSITION_FOLLOWING);
+    view.filter('COMMIT');
+    assert.deepEqual(view.names(), ['code-style', 'commits']);
+    assert.equal(view.$('summary').textContent, 'fixture · 2 of 4 skills');
+    view.filter('c');
+    view.filter('co');
+    view.filter('release');
+    assert.deepEqual(view.names(), ['release-checklist']);
+    assert.equal(view.$('summary').textContent, 'fixture · 1 of 4 skills');
+    assert.equal(view.$('no-match').textContent, '');
+    view.filter('');
+    assert.deepEqual(view.names(), ['code-style', 'commits', 'invoices', 'release-checklist']);
+    assert.equal(view.$('summary').textContent, 'fixture · 4 skills');
+    // The one scan above, and no other.
+    assert.equal(view.scans(), 1);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: the filter matches what --filter does, word by word', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    for (const word of ['commit', 'KOTLIN', 'Billing Module', 'release', 'e', "project's", 'zzz']) {
+      view.filter(word);
+      const { body } = await scan(FIXTURE, word);
+      assert.deepEqual(view.names(), body.skills.map((skill: { name: string }) => skill.name), word);
+    }
+  } finally {
+    view.close();
+  }
+});
+
+test('page: no match → no skills and a clear message, not an error', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    view.filter('zzz');
+    assert.deepEqual(view.items(), []);
+    assert.equal(view.$('no-match').textContent, 'no skills match "zzz"');
+    assert.equal(view.$('summary').textContent, 'fixture · 0 of 4 skills');
+    assert.equal(view.$('error').textContent, '');
+    assert.equal(view.$('main').hidden, false);
+    assert.equal(view.$('skill').querySelector('h2'), null);
+    assert.equal(view.search().skill, undefined);
+    // The warnings stay: they are the whole scan's.
+    assert.equal(view.$('warnings').children.length, 2);
+    view.filter('commits');
+    assert.equal(view.$('no-match').textContent, '');
+    assert.deepEqual(view.names(), ['commits']);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: the selected skill filtered out → the first one that matches is selected', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    view.items()[1].dispatchEvent(new view.dom.window.Event('click'));
+    const commits = view.selected();
+    // Still shown: still selected.
+    view.filter('commit');
+    assert.equal(view.selected(), commits);
+    view.filter('billing');
+    assert.deepEqual(view.names(), ['invoices']);
+    assert.equal(view.selected(), view.items()[0].dataset.path);
+    assert.equal(view.$('skill').querySelector('h2')!.textContent, 'invoices');
+    assert.equal(view.search().skill, view.selected());
+  } finally {
+    view.close();
+  }
+});
+
+test('page: the URL keeps the filter; reload shows the same', { timeout: 5_000 }, async () => {
+  const first = await page('/');
+  let href: string;
+  try {
+    await first.enter(FIXTURE);
+    first.filter('commit');
+    first.items()[1].dispatchEvent(new first.dom.window.Event('click'));
+    const path = first.items()[1].dataset.path!;
+    assert.deepEqual(first.search(), { repo: FIXTURE, skill: path, filter: 'commit' });
+    href = first.dom.window.location.href;
+    assert.match(href, /\?repo=[^&]+&skill=[^&]+&filter=commit$/);
+  } finally {
+    first.close();
+  }
+  const reloaded = await page(new URL(href).pathname + new URL(href).search);
+  try {
+    await reloaded.settled(1);
+    assert.equal((reloaded.$('filter') as HTMLInputElement).value, 'commit');
+    assert.deepEqual(reloaded.names(), ['code-style', 'commits']);
+    assert.equal(reloaded.$('summary').textContent, 'fixture · 2 of 4 skills');
+    assert.equal(reloaded.$('skill').querySelector('h2')!.textContent, 'commits');
+    // Cleared: the filter leaves the URL.
+    reloaded.filter('');
+    assert.equal(reloaded.search().filter, undefined);
+    // A failed scan keeps the filter for the reload too.
+    reloaded.filter('zzz');
+    await reloaded.enter('/no/such/directory');
+    assert.deepEqual(reloaded.search(), { repo: '/no/such/directory', filter: 'zzz' });
+  } finally {
+    reloaded.close();
+  }
+  const none = await page(`/?repo=${encodeURIComponent(FIXTURE)}&filter=zzz`);
+  try {
+    await none.settled(1);
+    assert.equal(none.$('no-match').textContent, 'no skills match "zzz"');
+  } finally {
+    none.close();
   }
 });
