@@ -1,6 +1,8 @@
 # Repository analysis
 ## Input
 A **GitHub repository** URL, or a local directory
+- `github.com/<owner>/<repo>`: the default branch
+- `github.com/<owner>/<repo>/tree/<commit or branch>`: that commit
 ## Output
 Every *project skill*: **name**, **description**, **link**
 ## Project skill
@@ -25,7 +27,8 @@ Skill: id = `repo:path`, name, description, commit, copies
 ## Details
 - **GitHub API**, no clone; *under 5 s* for intellij-community
 - A tree too large to list at once: only the agent folders at the root, and a *warning*;
-  `GITHUB_TOKEN` searches everywhere
+  `GITHUB_TOKEN` searches everywhere, on the default branch only
+- A commit or branch in the URL: always its tree; code search sees only the default branch
 - The name: front matter, else the directory
 - The link pins the *scanned commit*
 - Malformed front matter → a *warning*, the scan goes on

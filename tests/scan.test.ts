@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { openGitHub } from '../src/core/github.ts';
+import { openGitHub, parseGitHubUrl } from '../src/core/github.ts';
 import { parseSkill } from '../src/core/parse.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { scan } from '../src/core/scan.ts';
@@ -178,6 +178,38 @@ test('GitHub: a tree too large to list at once → only the agent folders at the
   assert.deepEqual(result.warnings, [
     'the tree is too large to list at once; looked only in .agents/skills, .claude/skills, .github/skills, agent/skills (GITHUB_TOKEN searches everywhere)',
   ]);
+});
+
+test('GitHub URL: …/tree/<commit or branch> pins what is scanned', () => {
+  assert.deepEqual(parseGitHubUrl('github.com/JetBrains/MPS'), { owner: 'JetBrains', repo: 'MPS' });
+  assert.deepEqual(parseGitHubUrl(`https://github.com/JetBrains/MPS/tree/${EXAMPLE_COMMIT}/`), {
+    owner: 'JetBrains',
+    repo: 'MPS',
+    ref: EXAMPLE_COMMIT,
+  });
+  assert.deepEqual(parseGitHubUrl('github.com/JetBrains/MPS/tree/release/2025.3'), { owner: 'JetBrains', repo: 'MPS', ref: 'release/2025.3' });
+});
+
+test('GitHub at a commit: its tree, even with a token; the links pin that commit', async () => {
+  const pinned = '1cbf7f783dbc5c74c8e5231d31f61b02829143de';
+  const recording = githubTree([{ path: '.claude/skills/commits/SKILL.md' }]);
+  recording[`https://api.github.com/repos/JetBrains/layout/commits/${pinned}`] = { status: 200, body: { sha: pinned } };
+  const tree = recording[`https://api.github.com/repos/JetBrains/layout/git/trees/${EXAMPLE_COMMIT}?recursive=1`];
+  recording[`https://api.github.com/repos/JetBrains/layout/git/trees/${pinned}?recursive=1`] = tree;
+  recording[`https://raw.githubusercontent.com/JetBrains/layout/${pinned}/.claude/skills/commits/SKILL.md`] = {
+    status: 200,
+    body: '---\nname: commits\ndescription: Commits.\n---\n',
+  };
+  // No code search is recorded: asking for it fails the scan.
+  const source = await openGitHub(`github.com/JetBrains/layout/tree/${pinned}`, { fetch: replay(recording), token: 'test' });
+  const result = await scan(source);
+  assert.equal(result.repository.commit, pinned);
+  assert.deepEqual(result.skills.map((skill) => skill.id), ['JetBrains/layout:.claude/skills/commits/SKILL.md']);
+
+  recording['https://api.github.com/repos/JetBrains/layout/commits/no-such-branch'] = { status: 404, body: { message: 'Not Found' } };
+  await assert.rejects(openGitHub('github.com/JetBrains/layout/tree/no-such-branch', { fetch: replay(recording) }), {
+    message: 'Not found in https://github.com/JetBrains/layout: no-such-branch',
+  });
 });
 
 test('the CLI prints the result at once and stores nothing', (t) => {
