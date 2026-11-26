@@ -7,12 +7,13 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { openGitHub, parseGitHubUrl } from '../src/core/github.ts';
+import { openGitHub, parseGitHubOwner, parseGitHubUrl } from '../src/core/github.ts';
+import { scanOrganisation } from '../src/core/organisation.ts';
 import { parseSkill } from '../src/core/parse.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { scan } from '../src/core/scan.ts';
 import { openDirectory } from '../src/local.ts';
-import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE } from './helpers.ts';
+import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, ORGANISATION_COMMIT, scanOrganisation as scanRecorded } from './helpers.ts';
 
 const fixture = await atlas(['scan', FIXTURE]);
 const example = await atlas(['scan', 'github.com/JetBrains/example']);
@@ -361,5 +362,153 @@ test('rate limit → a message that asks for GITHUB_TOKEN', async () => {
   });
   await assert.rejects(openGitHub('https://github.com/JetBrains/MPS', { fetch: limited }), {
     message: 'GitHub rate limit reached; set GITHUB_TOKEN',
+  });
+});
+
+// An organisation: github.com/skillatlas, answered from the recording in tests/helpers.ts.
+const organisation = await atlas(['scan', 'github.com/skillatlas']);
+
+test('organisation: github.com/<org>, with or without the scheme or a trailing slash; a repository is not one', () => {
+  for (const input of ['github.com/JetBrains', 'https://github.com/JetBrains/', ' http://www.github.com/JetBrains ']) {
+    assert.deepEqual(parseGitHubOwner(input), { owner: 'JetBrains' }, input);
+  }
+  for (const input of ['github.com/JetBrains/kotlin', 'github.com/', 'gitlab.com/JetBrains', './fixture']) {
+    assert.equal(parseGitHubOwner(input), undefined, input);
+  }
+});
+
+test('organisation: its repositories with their skill counts, by count, then by name in any case', () => {
+  assert.equal(organisation.code, 0, organisation.stderr);
+  assert.equal(
+    organisation.stdout,
+    [
+      'SkillAtlas · 7 repositories · 6 skills',
+      'alpha — 2 skills',
+      'Beta — 2 skills',
+      'example-tools — 2 skills',
+      'Docs — 0 skills',
+      'empty — 0 skills',
+      'huge — 0 skills',
+      'broken — not scanned',
+    ].join('\n'),
+  );
+});
+
+test('organisation: each repository by the same rules as one repository; its warnings start with its name', async () => {
+  // A SKILL.md outside the agent folders (Docs: skills/guide) is not a skill; malformed front matter is
+  // still a skill, with a warning; a tree too large to list at once, without the GITHUB_TOKEN hint:
+  // an organisation is never searched.
+  assert.deepEqual(organisation.stderr.split('\n'), [
+    'warning: example-tools: .agents/skills/release/SKILL.md: malformed front matter: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 15; using the directory name',
+    'warning: huge: the tree is too large to list at once; looked only in .agents/skills, .claude/skills, .github/skills, agent/skills',
+    'warning: broken: not scanned: GitHub rate limit reached; try again in a minute',
+  ]);
+  // The same count as scanning the repository on its own, at the commit scanned.
+  const result = await scanRecorded('github.com/skillatlas');
+  assert.deepEqual(result.repositories[0], {
+    name: 'alpha',
+    url: 'https://github.com/SkillAtlas/alpha',
+    commit: ORGANISATION_COMMIT,
+    skillCount: 2,
+  });
+  for (const { name, skillCount } of result.repositories.filter((repository) => repository.commit)) {
+    const alone = await atlas(['scan', `github.com/SkillAtlas/${name}/tree/${ORGANISATION_COMMIT}`]);
+    assert.match(alone.stdout, new RegExp(`^SkillAtlas/${name} · ${skillCount} skills?(\\n|$)`), name);
+  }
+});
+
+test('organisation: a repository that fails → a warning, the scan goes on; it is listed with no count', async () => {
+  const result = await scanRecorded('https://github.com/skillatlas/');
+  assert.deepEqual(result.repositories.at(-1), { name: 'broken', url: 'https://github.com/SkillAtlas/broken' });
+  assert.equal(result.repositories.length, 7);
+  assert.equal(result.skills, 6);
+  // Unreachable: the same.
+  const offline = await scanOrganisation('github.com/skillatlas', {
+    fetch: async (url) => {
+      if (url.endsWith('/users/skillatlas')) return Response.json({ login: 'SkillAtlas', type: 'Organization' });
+      if (url.includes('/orgs/SkillAtlas/repos')) return Response.json([{ name: 'a', full_name: 'SkillAtlas/a', default_branch: 'main', archived: false, fork: false }]);
+      throw new Error('connection refused');
+    },
+  });
+  assert.deepEqual(offline.repositories, [{ name: 'a', url: 'https://github.com/SkillAtlas/a' }]);
+  assert.deepEqual(offline.warnings, ['a: not scanned: Cannot reach GitHub: connection refused']);
+});
+
+test('organisation: archived repositories and forks are skipped; every page of the list is read', async () => {
+  const result = await scanRecorded('github.com/skillatlas');
+  const names = result.repositories.map((repository) => repository.name);
+  assert.ok(!names.some((name) => name.startsWith('old-')), names.join(', '));
+  // Beta and broken are on the second page.
+  assert.ok(names.includes('Beta') && names.includes('broken'));
+});
+
+test('organisation: a user works the same way', async () => {
+  assert.deepEqual(await atlas(['scan', 'https://github.com/someone/']), {
+    code: 0,
+    stdout: 'someone · 1 repository · 1 skill\ndotfiles — 1 skill',
+    stderr: '',
+  });
+});
+
+test('organisation: unknown → a clear message, exit code 1', async () => {
+  assert.deepEqual(await atlas(['scan', 'github.com/no-such-organisation']), {
+    code: 1,
+    stdout: '',
+    stderr: 'Organisation not found: https://github.com/no-such-organisation',
+  });
+});
+
+test('organisation: --filter works on one repository only → a clear message, exit code 1', async () => {
+  assert.deepEqual(await atlas(['scan', 'github.com/skillatlas', '--filter', 'review']), {
+    code: 1,
+    stdout: '',
+    stderr: '--filter works on one repository, not on an organisation',
+  });
+});
+
+test('organisation: at most `concurrency` repositories are scanned at the same time, 8 by default', async () => {
+  const names = Array.from({ length: 20 }, (_, index) => `r${String(index).padStart(2, '0')}`);
+  const most = async (concurrency?: number) => {
+    let running = 0;
+    let highest = 0;
+    const result = await scanOrganisation('github.com/many', {
+      concurrency,
+      fetch: async (url) => {
+        if (url.endsWith('/users/many')) return Response.json({ login: 'many', type: 'User' });
+        if (url.includes('/users/many/repos')) {
+          return Response.json(names.map((name) => ({ name, full_name: `many/${name}`, default_branch: 'main', archived: false, fork: false })));
+        }
+        if (url.includes('/commits/main')) {
+          running++;
+          highest = Math.max(highest, running);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return Response.json({ sha: EXAMPLE_COMMIT });
+        }
+        running--;
+        return Response.json({ truncated: false, tree: [] });
+      },
+    });
+    assert.equal(result.repositories.length, 20);
+    // Ties: by name.
+    assert.deepEqual(result.repositories.map((repository) => repository.name), names);
+    return highest;
+  };
+  assert.equal(await most(3), 3);
+  assert.equal(await most(), 8);
+});
+
+test('organisation: an empty repository, without a commit → 0 skills, no warning', async () => {
+  const result = await scanRecorded('github.com/skillatlas');
+  assert.deepEqual(result.repositories.find((repository) => repository.name === 'empty'), {
+    name: 'empty',
+    url: 'https://github.com/SkillAtlas/empty',
+    skillCount: 0,
+  });
+  assert.ok(!result.warnings.some((warning) => warning.startsWith('empty:')));
+  // On its own: a clear message, exit code 1.
+  assert.deepEqual(await atlas(['scan', 'github.com/SkillAtlas/empty']), {
+    code: 1,
+    stdout: '',
+    stderr: 'Repository is empty: https://github.com/SkillAtlas/empty',
   });
 });

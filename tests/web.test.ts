@@ -7,10 +7,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { after, test } from 'node:test';
-import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, open } from './helpers.ts';
+import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, open, ORGANISATION_COMMIT, scanOrganisation } from './helpers.ts';
 import { serve } from '../src/web.ts';
 
-const { server, url } = await serve({ open, port: 0 });
+const { server, url } = await serve({ open, scanOrganisation, port: 0 });
 after(() => server.close());
 const port = new URL(url).port;
 
@@ -557,5 +557,132 @@ test('page: after a failed scan, changing the filter still updates the URL', { t
     assert.equal(reloaded.$('main').hidden, true);
   } finally {
     reloaded.close();
+  }
+});
+
+test('API: an organisation → its repositories, each with its commit and skill count; warnings', async () => {
+  const { status, body } = await scan('github.com/skillatlas');
+  assert.equal(status, 200);
+  assert.deepEqual(body.organisation, { name: 'SkillAtlas', url: 'https://github.com/SkillAtlas' });
+  assert.deepEqual(body.repositories[0], {
+    name: 'alpha',
+    url: 'https://github.com/SkillAtlas/alpha',
+    commit: ORGANISATION_COMMIT,
+    skillCount: 2,
+  });
+  // The same order, counts and warnings as the CLI; a repository that failed: no commit, no count.
+  const cli = await atlas(['scan', 'github.com/skillatlas']);
+  assert.deepEqual(
+    body.repositories.map((repository: { name: string; skillCount: number | null }) =>
+      `${repository.name} — ${repository.skillCount === null ? 'not scanned' : `${repository.skillCount} skill${repository.skillCount === 1 ? '' : 's'}`}`),
+    cli.stdout.split('\n').slice(1),
+  );
+  assert.deepEqual(body.repositories.at(-1), { name: 'broken', url: 'https://github.com/SkillAtlas/broken', commit: null, skillCount: null });
+  assert.equal(body.skills, 6);
+  assert.deepEqual(body.warnings.map((warning: string) => `warning: ${warning}`), cli.stderr.split('\n'));
+});
+
+test('API: an unknown organisation, or a filter on one → 400 and its message', async () => {
+  assert.deepEqual(await scan('github.com/no-such-organisation'), {
+    status: 400,
+    body: { error: 'Organisation not found: https://github.com/no-such-organisation' },
+  });
+  assert.deepEqual(await scan('github.com/skillatlas', 'review'), {
+    status: 400,
+    body: { error: 'filter works on one repository, not on an organisation' },
+  });
+  // No words: no filter.
+  assert.equal((await scan('github.com/skillatlas', ' ')).status, 200);
+});
+
+test('page: an organisation link → its repositories with their counts; selecting one shows its skills', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    assert.equal(view.$('organisation').hidden, false);
+    assert.equal(view.$('org-summary').textContent, 'SkillAtlas · 7 repositories · 6 skills');
+    const repositories = () => [...view.$('repositories').children] as HTMLElement[];
+    assert.deepEqual(
+      repositories().map((item) => [view.text(item, '.name'), view.text(item, '.count')]),
+      [['alpha', '2 skills'], ['Beta', '2 skills'], ['example-tools', '2 skills'], ['Docs', '0 skills'], ['empty', '0 skills'], ['huge', '0 skills'], ['broken', 'not scanned']],
+    );
+    assert.equal(view.$('org-warnings').children.length, 3);
+    // No repository selected yet: no skills.
+    assert.equal(view.$('main').hidden, true);
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas' });
+
+    const scans = view.scans();
+    repositories()[1].dispatchEvent(new view.dom.window.Event('click'));
+    await view.settled(scans + 1);
+    assert.equal(repositories()[1].getAttribute('aria-selected'), 'true');
+    assert.equal(view.$('main').hidden, false);
+    assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    assert.deepEqual(view.names(), ['four', 'three']);
+    assert.equal(view.$('skill').querySelector('h2')!.textContent, 'four');
+    // The filter narrows the selected repository's skills, as today.
+    view.filter('three');
+    assert.deepEqual(view.names(), ['three']);
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'Beta', skill: '.agents/skills/three/SKILL.md', filter: 'three' });
+  } finally {
+    view.close();
+  }
+});
+
+test('page: the URL keeps the organisation and the repository; reload shows the same', { timeout: 5_000 }, async () => {
+  const view = await page(`/?repo=${encodeURIComponent('github.com/skillatlas')}&repository=alpha&skill=${encodeURIComponent('web/.github/skills/two/SKILL.md')}`);
+  try {
+    await view.settled(2);
+    assert.equal((view.$('repo') as HTMLInputElement).value, 'github.com/skillatlas');
+    assert.equal(view.$('org-summary').textContent, 'SkillAtlas · 7 repositories · 6 skills');
+    assert.equal(view.$('summary').textContent, `SkillAtlas/alpha · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    assert.equal(view.selected(), 'web/.github/skills/two/SKILL.md');
+    assert.equal(view.$('skill').querySelector('h2')!.textContent, 'two');
+  } finally {
+    view.close();
+  }
+  // Only the organisation: its repositories, none selected.
+  const organisation = await page(`/?repo=${encodeURIComponent('github.com/skillatlas')}`);
+  try {
+    await organisation.settled(1);
+    assert.equal(organisation.$('repositories').children.length, 7);
+    assert.equal(organisation.$('main').hidden, true);
+    assert.equal(organisation.scans(), 1);
+  } finally {
+    organisation.close();
+  }
+});
+
+test('page: a repository of the organisation that fails → its message; the organisation stays', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    const broken = [...view.$('repositories').children].at(-1) as HTMLElement;
+    const scans = view.scans();
+    broken.dispatchEvent(new view.dom.window.Event('click'));
+    await view.settled(scans + 1);
+    assert.equal(view.$('error').textContent, 'GitHub rate limit reached; try again in a minute');
+    assert.equal(view.$('organisation').hidden, false);
+    assert.equal(view.$('main').hidden, true);
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'broken' });
+    // A repository link after it: no organisation.
+    await view.enter('https://github.com/JetBrains/example');
+    assert.equal(view.$('organisation').hidden, true);
+    assert.equal(view.$('error').textContent, '');
+    assert.deepEqual(view.search(), { repo: 'https://github.com/JetBrains/example', skill: '.claude/skills/commits/SKILL.md' });
+  } finally {
+    view.close();
+  }
+});
+
+test('page: an unknown organisation → its message, nothing else', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    await view.enter('github.com/no-such-organisation');
+    assert.equal(view.$('error').textContent, 'Organisation not found: https://github.com/no-such-organisation');
+    assert.equal(view.$('organisation').hidden, true);
+    assert.equal(view.$('main').hidden, true);
+  } finally {
+    view.close();
   }
 });

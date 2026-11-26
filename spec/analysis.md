@@ -3,6 +3,7 @@
 A **GitHub repository** URL, or a local directory
 - `github.com/<owner>/<repo>`: the default branch
 - `github.com/<owner>/<repo>/tree/<commit or branch>`: that commit
+- `github.com/<org>`: an **organisation** or a user, no repository; see *Organisation*
 ## Output
 Every *project skill*: **name**, **description**, **link**
 - A **filter**, optional: its text split on *whitespace* into words; only the skills whose name or
@@ -39,3 +40,22 @@ Skill: id = `repo:path`, name, description, commit, copies
 - The link pins the *scanned commit*
 - Malformed front matter → a *warning*, the scan goes on
 - Unreachable repository → a clear message, exit code 1
+- An empty repository, without a commit → a clear message, exit code 1
+## Organisation
+`github.com/<org>`: every repository of an organisation, or of a user, each with its **skill count**
+- **Output**: the organisation, its **repositories** (each with its name, commit, skill count),
+  the count of all their skills, warnings
+- Each repository on its *default branch*, by the same rules as one repository; its warnings start
+  with `<repo>: `
+  - Always through its *tree*, even with `GITHUB_TOKEN`: code search allows too few requests a
+    minute for every repository; a tree too large → only the agent folders at the root, and a warning
+- Sorted by skill count, the most first, then by **name**, *case-insensitive*
+- **Skipped**: archived repositories and forks
+- With `GITHUB_TOKEN`: the private repositories it can see too; a user: their public repositories
+- A repository that fails (unreachable, rate limited, …) → a *warning*, `<repo>: not scanned:
+  <message>`; the scan goes on; it is listed **last**, with *no count* and no commit
+- An empty repository → *0 skills*, no warning
+- *8 repositories* at a time; no time budget: JetBrains, 549 repositories, in about a minute with
+  `GITHUB_TOKEN`
+- No filter: it is for one repository
+- Unknown organisation → `Organisation not found: https://github.com/<org>`, exit code 1

@@ -2,20 +2,28 @@
 // stored; each request scans again.
 import { createServer, type Server } from 'node:http';
 import { AtlasError } from './core/errors.ts';
+import { parseGitHubOwner } from './core/github.ts';
 import { firstSentence, skillLink } from './core/model.ts';
+import type { OrganisationResult } from './core/organisation.ts';
 import { scan, type Source } from './core/scan.ts';
 import { PAGE } from './web-page.ts';
 
 export type WebOptions = {
   /** Opens what the user asked to scan, as the CLI does. */
   open(input: string): Promise<Source>;
+  /** Scans every repository of a GitHub organisation, as the CLI does. */
+  scanOrganisation(input: string): Promise<OrganisationResult>;
 };
 
 /**
  * The scan as JSON: each skill with its first sentence, its link and its SKILL.md text; with a
  * filter, only the skills that match every word of it, and `total`, the count before the filter.
  */
-export async function scanJson(input: string, { open }: WebOptions, filter?: string) {
+export async function scanJson(input: string, { open, scanOrganisation }: WebOptions, filter?: string) {
+  if (parseGitHubOwner(input)) {
+    if (filter) throw new AtlasError('filter works on one repository, not on an organisation');
+    return organisationJson(await scanOrganisation(input));
+  }
   const source = await open(input);
   // Each file is read once: the text shown is the text the scan parsed.
   const texts = new Map<string, Promise<Uint8Array | undefined>>();
@@ -34,6 +42,16 @@ export async function scanJson(input: string, { open }: WebOptions, filter?: str
     })),
   );
   return { repository: result.repository, skills, total: result.total, warnings: result.warnings };
+}
+
+/** An organisation: its repositories, each with its commit and its skill count; null for the ones that failed. */
+function organisationJson({ organisation, repositories, skills, warnings }: OrganisationResult) {
+  return {
+    organisation,
+    repositories: repositories.map(({ name, url, commit, skillCount }) => ({ name, url, commit: commit ?? null, skillCount: skillCount ?? null })),
+    skills,
+    warnings,
+  };
 }
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);

@@ -42,3 +42,32 @@ for (const { name, commit } of REPOSITORIES) {
     assert.equal(scanned.stderr, readFileSync(stderr, 'utf8'));
   });
 }
+
+// A real organisation, on each repository's default branch, so not a stored output: what is always
+// true of it. vietage owns this repository's fork, which is skipped.
+test('./skill-atlas scan github.com/<org> lists its repositories with their skill counts', { timeout: 60_000 }, async () => {
+  const scanned = await atlas(['scan', 'github.com/vietage']);
+  assert.equal(scanned.code, 0, scanned.stderr);
+  const [header, ...lines] = scanned.stdout.trimEnd().split('\n');
+  const total = /^vietage · (\d+) repositor(?:y|ies) · (\d+) skills?$/.exec(header);
+  assert.ok(total, header);
+  assert.equal(lines.length, Number(total[1]));
+  const repositories = lines.map((line) => {
+    const match = /^([\w.-]+) — (?:(\d+) skills?|not scanned)$/.exec(line);
+    assert.ok(match, line);
+    return { name: match[1], count: match[2] === undefined ? -1 : Number(match[2]) };
+  });
+  assert.equal(repositories.reduce((sum, { count }) => sum + Math.max(count, 0), 0), Number(total[2]));
+  const sorted = [...repositories].sort((a, b) => b.count - a.count || (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1));
+  assert.deepEqual(repositories, sorted);
+  assert.ok(!repositories.some(({ name }) => name === 'ai-workshop-start'), 'a fork is skipped');
+});
+
+test('./skill-atlas scan github.com/<unknown org> → a clear message, exit code 1', { timeout: 60_000 }, async () => {
+  const scanned = await atlas(['scan', 'github.com/skill-atlas-no-such-organisation-0']);
+  assert.deepEqual(scanned, {
+    code: 1,
+    stdout: '',
+    stderr: 'Organisation not found: https://github.com/skill-atlas-no-such-organisation-0\n',
+  });
+});

@@ -3,18 +3,21 @@
 // stderr, or the local web view. Nothing is stored.
 import { run } from './commands.ts';
 import { openGitHub, parseGitHubUrl } from './core/github.ts';
+import { scanOrganisation as scanOwner } from './core/organisation.ts';
 import { openDirectory } from './local.ts';
 import { serve } from './web.ts';
 
 const token = process.env.GITHUB_TOKEN || undefined;
 const open = (input: string) => (parseGitHubUrl(input) ? openGitHub(input, { fetch, token }) : openDirectory(input));
+const scanOrganisation = (input: string) => scanOwner(input, { fetch, token });
 
 process.exitCode = await run(process.argv.slice(2), {
   open,
+  scanOrganisation,
   print: (text) => console.log(text),
   error: (text) => console.error(text),
   serve: async (port) => {
-    const { url } = await serve({ open, port });
+    const { url } = await serve({ open, scanOrganisation, port });
     console.log(`Skill Atlas: ${url} (Ctrl+C to stop)`);
   },
 });
