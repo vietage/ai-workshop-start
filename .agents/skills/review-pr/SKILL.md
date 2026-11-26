@@ -39,7 +39,16 @@ Stop with one line, setting and posting nothing, when:
   has a `Verdict:` line: this commit is already reviewed (by you, or by another run started for
   the same commit) and nobody asked again since;
 - the latest status on `$head` is `error` (`Needs a person`): only a person's `Ready for review`
-  restarts the chain.
+  restarts the chain;
+- an address-review run holds a live claim on the PR (a comment with `<!-- air-chain claim -->`,
+  edited in the last 2 hours; see address-review, step 1) and that run did not start you: it
+  re-reviews its own commits.
+
+```bash
+gh api "repos/$repo/issues/$pr/comments?per_page=100" --paginate --jq '.[]
+  | select((.body | contains("<!-- air-chain claim -->")) and (.updated_at | fromdateiso8601) > now - 7200)
+  | "\(.id) \(.updated_at) \(.body | split("\n")[0])"'
+```
 
 ## 2. Collect the change
 
@@ -132,6 +141,10 @@ gh api "repos/$repo/pulls/$pr/reviews" --input review.json --jq .html_url
 #               "comments": [{"path": "...", "line": 12, "side": "RIGHT", "body": "..."}]}
 ```
 
+Right before posting, check again that the PR's head is still `$head` and that no review on
+`$head` has a `Verdict:` line yet: another reviewer may have finished while you worked. If one
+has, post nothing, set nothing, and stop with one line: one verdict per commit.
+
 If an inline anchor is rejected, move that finding into the review body. On a re-review, also
 reply in each earlier thread (fixed / reason accepted / kept), each reply ending with
 `<!-- air-chain note -->`. Always post the review, an approve with no findings too (its body is
@@ -143,7 +156,8 @@ such as "request changes".
 
 Always, as the last thing you do, set the `air-chain/review` status on `$head`. Before setting it,
 check the head is still `$head` (`gh pr view $pr --json headRefOid`). If it moved, set nothing and
-stop: a new commit gets reviewed when someone (the agent or a person) sets `Ready for review` on it.
+stop: the new commit is re-reviewed by the address-review run that pushed it, or by you when a
+person sets `Ready for review` on it.
 
 ```bash
 # approve: target_url is the review's html_url
