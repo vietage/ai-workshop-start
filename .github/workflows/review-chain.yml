@@ -1,0 +1,41 @@
+# The review chain (.agents/review-chain.md): Air's GitHub triggers don't fire on comments, so this
+# forwards the two comments that drive the chain to the Air automations' webhook triggers.
+#   a verdict comment ("<!-- air-chain verdict=… -->")  → the address-review automation
+#   a comment whose first line is "Ready for review"     → the review-pr automation
+name: Review chain
+on:
+  issue_comment:
+    types: [created]
+permissions: {}
+concurrency:
+  group: review-chain-${{ github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  forward:
+    # Pull requests only, and only comments from the review automation or from people who may
+    # change the repository: on a public repository anyone can comment.
+    if: >-
+      github.event.issue.pull_request &&
+      (github.event.comment.user.login == 'jetbrains-air[bot]' ||
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # The default branch's script, never the pull request's code.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github
+      - name: Forward to the matching automation
+        env:
+          # The comment goes through the environment, never into the script: it is untrusted text.
+          BODY: ${{ github.event.comment.body }}
+          REPOSITORY: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_URL: ${{ github.event.comment.html_url }}
+          AUTHOR: ${{ github.event.comment.user.login }}
+          REVIEW_URL: ${{ secrets.AIR_REVIEW_WEBHOOK_URL }}
+          REVIEW_TOKEN: ${{ secrets.AIR_REVIEW_WEBHOOK_TOKEN }}
+          ADDRESS_URL: ${{ secrets.AIR_ADDRESS_WEBHOOK_URL }}
+          ADDRESS_TOKEN: ${{ secrets.AIR_ADDRESS_WEBHOOK_TOKEN }}
+        run: node .github/review-chain-forward.mjs
