@@ -1,5 +1,5 @@
 import { test } from '@playwright/test';
-import { expect, scanFromPage } from './helpers.ts';
+import { expect, scanFromPage, screenshot } from './helpers.ts';
 
 const COMMIT = '709079e4a34d6c9234583352550e6a2b88a0bb85';
 
@@ -14,5 +14,6 @@ test('github-repository: Scan a GitHub repository at a commit', async ({ page })
   await test.step('The first skill links to the commit', async () => {
     await page.locator('#skills li').first().click();
     await expect(page.locator('#skill a')).toHaveAttribute('href', new RegExp(`^https://github\\.com/JetBrains/koog/blob/${COMMIT}/.+/SKILL\\.md$`));
+    await screenshot(page, 'github-repository-first-skill');
   });
 });

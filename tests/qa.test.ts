@@ -1,7 +1,8 @@
 // The decisions in spec/qa.md: every scenario has its script, and which failures become issues and
 // what they say, checked with `qa/file-issues.ts` on a report shaped like Playwright's: with
 // `--dry-run`, and for real against a stub `gh` that logs its calls.
-// The scripts themselves run in a browser: `npm run qa`.
+// The end-to-end run, `npm run e2e`: its screenshots and baselines, the Docker image and the CI jobs.
+// The scripts themselves run in a browser: `npm run qa`, `npm run e2e`.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -9,6 +10,8 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { parse as parseYaml } from 'yaml';
+import { dockerArgs, image, playwrightVersion, WORKDIR } from '../qa/e2e.ts';
 import { failures, issueBody, issueTitle, readScenario, type Report } from '../qa/file-issues.ts';
 
 const QA = fileURLToPath(new URL('../qa/', import.meta.url));
@@ -202,4 +205,100 @@ test('qa:issues: an open issue for the scenario gets a comment, not a new issue'
   assert.match(comments[0][4], /^Still failing\.\n\nThe manual QA scenario \*\*failed-scan\*\* failed/);
   assert.match(comments[0][4], /releases\/download\/qa-recordings\//);
   assert.match(out, /commented: https:\/\/github\.com\/owner\/repo\/issues\/12/);
+});
+
+// The end-to-end run: the key moments' screenshots against the Linux baselines in qa/screenshots.
+
+/** The screenshots each script names: `screenshot(<target>, '<name>')`. */
+const screenshotsOf = (id: string) =>
+  [...readFileSync(join(QA, 'scripts', `${id}.spec.ts`), 'utf8').matchAll(/screenshot\([^,]+,\s*'([^']+)'\)/g)].map((m) => m[1]);
+
+test('every scenario names screenshots of its key moments, <id>-<moment>, each with its committed baseline', () => {
+  const named: string[] = [];
+  for (const id of ids('scenarios', '.md')) {
+    const names = screenshotsOf(id);
+    assert.ok(names.length > 0, `${id}: no screenshot`);
+    for (const name of names) assert.match(name, new RegExp(`^${id}-[a-z0-9-]+$`), id);
+    assert.equal(new Set(names).size, names.length, `${id}: a screenshot named twice`);
+    named.push(...names);
+  }
+  // A baseline for every screenshot, and no baseline that no script names.
+  assert.deepEqual(ids('screenshots', '.png'), named.sort());
+  for (const name of named) {
+    const png = readFileSync(join(QA, 'screenshots', `${name}.png`));
+    assert.equal(png.subarray(1, 4).toString(), 'PNG', name);
+  }
+});
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const PLAYWRIGHT = join(ROOT, 'node_modules/@playwright/test/cli.js');
+// Only the list reporter, and a run of its own: no report.json that `qa:issues` would take for the newest run.
+const listScenarios = (env: NodeJS.ProcessEnv) =>
+  spawnSync(process.execPath, [PLAYWRIGHT, 'test', '-c', join(QA, 'playwright.config.ts'), '--list', '--reporter', 'list'],
+    { cwd: ROOT, encoding: 'utf8', env: { ...process.env, QA_SCREENSHOTS: '', QA_RUN_ID: `test-list-${process.pid}`, ...env } });
+
+test('npm run qa: every scenario, its screenshots not compared; QA_SCREENSHOTS=1 only in the Docker image, at /work', (t) => {
+  t.after(() => rmSync(join(QA, 'results', `test-list-${process.pid}`), { recursive: true, force: true }));
+  const plain = listScenarios({});
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.match(plain.stdout, new RegExp(`Total: ${ids('scenarios', '.md').length} tests`));
+  assert.notEqual(ROOT, `${WORKDIR}/`);
+  const compared = listScenarios({ QA_SCREENSHOTS: '1' });
+  assert.notEqual(compared.status, 0);
+  assert.match(compared.stdout + compared.stderr, /QA_SCREENSHOTS=1 compares the screenshots only in the Docker image, at \/work.*npm run e2e/);
+});
+
+test('npm run e2e: the official Playwright image of the installed @playwright/test, the scenarios compared in /work', () => {
+  const lock = JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8'));
+  const installed = JSON.parse(readFileSync(join(ROOT, 'node_modules/@playwright/test/package.json'), 'utf8')).version;
+  assert.equal(playwrightVersion(lock), installed);
+  assert.equal(image(), `mcr.microsoft.com/playwright:v${installed}-noble`);
+  assert.throws(() => playwrightVersion({ packages: {} }), /No @playwright\/test/);
+
+  const args = dockerArgs(['filter-skills', '--update-snapshots'], {
+    commit: 'c0ffee', owner: '1000:1000', env: { GITHUB_TOKEN: 'secret-token', QA_OFFLINE: '1' },
+  });
+  assert.deepEqual(args.slice(0, 6), ['run', '--rm', '--init', '--ipc=host', '--platform', 'linux/amd64']);
+  const env = args.flatMap((arg, i) => (args[i - 1] === '-e' ? [arg] : []));
+  assert.deepEqual(env, ['QA_SCREENSHOTS=1', 'NPM_CONFIG_UPDATE_NOTIFIER=false', 'QA_COMMIT=c0ffee', 'GITHUB_TOKEN', 'QA_OFFLINE']);
+  // The token by name: its value never on the command line.
+  assert.ok(!args.some((arg) => arg.includes('secret-token')));
+  assert.ok(args.includes(image()));
+  // The playwright arguments, after the script, as its "$@".
+  assert.deepEqual(args.slice(-3), ['sh', 'filter-skills', '--update-snapshots']);
+  const script = args[args.indexOf('-c') + 1];
+  assert.match(script, /tar -C \/src --exclude=\.\/node_modules --exclude=\.\/qa\/results -cf - \. \| tar -C \/work -xf -/);
+  assert.match(script, /npx playwright test -c qa\/playwright\.config\.ts "\$@"/);
+  assert.match(script, /chown -R 1000:1000 \/src\/qa\/results \/src\/qa\/screenshots/);
+
+  const dry = spawnSync(process.execPath, [join(QA, 'e2e.ts'), '--dry-run', 'select-skill'], { encoding: 'utf8' });
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, new RegExp(`^docker run --rm .*${image().replace(/[.:]/g, '\\$&')} sh -c .* sh select-skill\n$`, 's'));
+});
+
+const workflow = (name: string) => parseYaml(readFileSync(join(ROOT, '.github/workflows', name), 'utf8')) as {
+  on: Record<string, unknown> | string[]; permissions: Record<string, string>;
+  jobs: Record<string, { steps: { run?: string; uses?: string; if?: string; env?: Record<string, string>; with?: Record<string, unknown> }[] }>;
+};
+
+test('CI: on every push and pull request, the scenarios run with their screenshots; a failure uploads the run', () => {
+  const ci = workflow('ci.yml');
+  assert.ok('push' in ci.on && 'pull_request' in ci.on);
+  const steps = ci.jobs.e2e.steps;
+  const run = steps.find((step) => step.run === 'npm run e2e');
+  assert.ok(run, 'no npm run e2e');
+  assert.equal(run.env?.GITHUB_TOKEN, '${{ secrets.GITHUB_TOKEN }}');
+  const upload = steps.find((step) => step.uses?.startsWith('actions/upload-artifact@'));
+  assert.equal(upload?.if, 'failure()');
+  assert.equal(upload?.with?.path, 'qa/results/');
+});
+
+test('Update screenshots: by hand, on a branch; new baselines checked by a second run, as an artifact, nothing pushed', () => {
+  const update = workflow('update-screenshots.yml');
+  assert.deepEqual(Object.keys(update.on), ['workflow_dispatch']);
+  assert.deepEqual(update.permissions, { contents: 'read' });
+  const runs = update.jobs.update.steps.map((step) => step.run).filter(Boolean);
+  assert.deepEqual(runs.filter((run) => run!.startsWith('npm run e2e')), ['npm run e2e -- --update-snapshots', 'npm run e2e']);
+  const upload = update.jobs.update.steps.find((step) => step.with?.name === 'screenshots');
+  assert.equal(upload?.with?.path, 'qa/screenshots/');
 });

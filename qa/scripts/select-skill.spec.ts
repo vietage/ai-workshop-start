@@ -1,5 +1,5 @@
 import { test } from '@playwright/test';
-import { expect, FIXTURE, scanFromPage } from './helpers.ts';
+import { expect, FIXTURE, scanFromPage, screenshot } from './helpers.ts';
 
 const PATH = 'modules/billing/.claude/skills/invoices/SKILL.md';
 
@@ -15,6 +15,7 @@ test('select-skill: Select a skill to see its SKILL.md', async ({ page }) => {
     await expect(page.locator('#skill a')).toHaveAttribute('href', new RegExp(`/fixture/${PATH.replace(/\./g, '\\.')}$`));
     await expect(page.locator('#content')).toContainText(/^---\n/);
     await expect(page.locator('#content')).toContainText('Create invoices the way the billing module does.');
+    await screenshot(page, 'select-skill-invoices');
   });
   await test.step('The URL keeps the skill', async () => {
     expect(new URL(page.url()).searchParams.get('skill')).toBe(PATH);

@@ -1,5 +1,5 @@
 import { test } from '@playwright/test';
-import { expect, FIXTURE, scanFromPage } from './helpers.ts';
+import { expect, FIXTURE, scanFromPage, screenshot } from './helpers.ts';
 
 test('copies-and-warnings: Copies and warnings are shown', async ({ page }) => {
   await test.step('Scan fixture/', () => scanFromPage(page, FIXTURE));
@@ -13,5 +13,6 @@ test('copies-and-warnings: Copies and warnings are shown', async ({ page }) => {
     await expect(warnings).toHaveCount(2);
     await expect(warnings.nth(0)).toContainText('.agents/skills/release-checklist/SKILL.md: malformed front matter');
     await expect(warnings.nth(1)).toContainText('.claude/skills/commits/SKILL.md: its copies differ: .github/skills/commits/SKILL.md');
+    await screenshot(page.locator('#list'), 'copies-and-warnings-list');
   });
 });

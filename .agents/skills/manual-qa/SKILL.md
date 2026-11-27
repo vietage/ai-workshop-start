@@ -44,6 +44,11 @@ npm run qa                          # every scenario
 npm run qa -- filter-skills failed  # those whose file name matches
 ```
 
+This does not compare the screenshots of the key moments: that is `npm run e2e`, in the
+Playwright Docker image, as on CI (see [qa/README.md](../../../qa/README.md)). A screenshot that
+differs on CI is not filed by this skill: look at the `e2e-report` artifact, and if the change is
+wanted, update the baselines with the *Update screenshots* workflow.
+
 The config starts the web view on port 4174 (`QA_PORT`) and stops it at the end. Each run goes to
 `qa/results/<run>/`. That folder has `report.json`, plus a `video.webm`, `trace.zip` and screenshot
 for each scenario, passed or failed.
@@ -110,5 +115,9 @@ When the user asks for a new scenario, or when you find a spec case with no scen
 1. Write `qa/scenarios/<id>.md` with front matter (`id`, `title`, `spec`), then `## Steps` and
    `## Expected`. Take them from the spec, not from what the page does now.
 2. Write `qa/scripts/<id>.spec.ts` with one test titled `<id>: <title>` and one `test.step` per step.
-   Use the helpers in `qa/scripts/helpers.ts`.
-3. Run `npm test`. `tests/qa.test.ts` checks that every scenario has a script and front matter.
+   Use the helpers in `qa/scripts/helpers.ts`. Add `screenshot(page, '<id>-<moment>')` at each key
+   moment, the states a person would check.
+3. Its baselines: push the branch and run the *Update screenshots* workflow on it, then commit
+   the `screenshots` artifact into `qa/screenshots/` (qa/README.md). Never on your machine.
+4. Run `npm test`. `tests/qa.test.ts` checks that every scenario has a script, front matter, and
+   a baseline for each screenshot.

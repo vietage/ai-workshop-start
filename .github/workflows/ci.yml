@@ -30,3 +30,27 @@ jobs:
         run: |
           ./skill-atlas help
           ./skill-atlas scan ./fixture
+  # The QA scenarios (qa/) as end-to-end tests, in a real browser, in the official Playwright Docker
+  # image of the @playwright/test version: a failed scenario, or a screenshot that differs from its
+  # baseline in qa/screenshots, fails the build. New baselines: the "Update screenshots" workflow.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm run e2e
+        env:
+          # github-repository asks the real GitHub; a token raises its rate limit.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The HTML report (the expected, actual and diff images of each screenshot that differs), the
+      # videos, traces and screenshots of every scenario: `npx playwright show-report <dir>/report`.
+      - name: Upload the QA run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-report
+          path: qa/results/
+          retention-days: 14

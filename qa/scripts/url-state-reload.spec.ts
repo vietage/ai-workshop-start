@@ -1,5 +1,5 @@
 import { test } from '@playwright/test';
-import { expect, FIXTURE, scanFromPage, selectedName } from './helpers.ts';
+import { expect, FIXTURE, scanFromPage, screenshot, selectedName } from './helpers.ts';
 
 const INVOICES = 'modules/billing/.claude/skills/invoices/SKILL.md';
 
@@ -22,5 +22,6 @@ test('url-state-reload: Reload keeps the repository, the skill and the filter', 
     await expect(page.locator('#summary')).toHaveText('fixture · 2 of 4 skills');
     await expect(selectedName(page)).toHaveText('invoices');
     await expect(page.locator('#skill h2')).toHaveText('invoices');
+    await screenshot(page, 'url-state-reload-after-reload');
   });
 });

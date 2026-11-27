@@ -35,6 +35,10 @@ for the repository or organisation link, its skills (with a field to filter them
 Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests. `npm run qa` tests the
 web view in a browser, scenario by scenario, and records each one; `npm run qa:issues` files an issue
 for each failure ([qa/](qa/README.md), the [manual-qa skill](.agents/skills/manual-qa/SKILL.md)).
+`npm run e2e` runs the same scenarios in the Playwright Docker image, as CI does on every push and
+pull request, and compares the screenshots of their key moments with the Linux baselines in
+`qa/screenshots`; the *Update screenshots* workflow makes new ones
+([qa/README.md](qa/README.md#update-the-baselines)).
 
 - [spec/](spec/): what it does. [AGENTS.md](AGENTS.md): the definition of done.
 - [fixture/](fixture/README.md): a small repository for the tests.

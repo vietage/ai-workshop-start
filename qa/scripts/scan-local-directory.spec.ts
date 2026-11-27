@@ -1,5 +1,5 @@
 import { test } from '@playwright/test';
-import { expect, FIXTURE, scanFromPage, selectedName, skillNames } from './helpers.ts';
+import { expect, FIXTURE, scanFromPage, screenshot, selectedName, skillNames } from './helpers.ts';
 
 test('scan-local-directory: Scan a local directory', async ({ page }) => {
   await test.step('Scan fixture/', () => scanFromPage(page, FIXTURE));
@@ -22,5 +22,6 @@ test('scan-local-directory: Scan a local directory', async ({ page }) => {
   });
   await test.step('No error', async () => {
     await expect(page.locator('#error')).toBeEmpty();
+    await screenshot(page, 'scan-local-directory-scanned');
   });
 });

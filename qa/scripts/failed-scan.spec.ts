@@ -1,5 +1,5 @@
 import { test } from '@playwright/test';
-import { expect, FIXTURE, scanFromPage } from './helpers.ts';
+import { expect, FIXTURE, scanFromPage, screenshot } from './helpers.ts';
 
 const MISSING = '/no/such/directory';
 
@@ -16,11 +16,13 @@ test('failed-scan: A failed scan shows its message and nothing else', async ({ p
     message = (await page.locator('#error').textContent()) ?? '';
     await expect(page.locator('#main')).toBeHidden();
     await expect(page.getByRole('button', { name: 'Scan' })).toBeEnabled();
+    await screenshot(page, 'failed-scan-message');
   });
   await test.step('Reload shows the same message', async () => {
     expect(new URL(page.url()).searchParams.get('repo')).toBe(MISSING);
     await page.reload();
     await expect(page.locator('#error')).toHaveText(message);
     await expect(page.locator('#main')).toBeHidden();
+    await screenshot(page, 'failed-scan-after-reload');
   });
 });
