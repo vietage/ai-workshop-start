@@ -15,6 +15,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [failed-scan.mp4](failed-scan.mp4) | [failed-scan.json](failed-scan.json) | a failed scan shows its message and nothing else, [#20](https://github.com/vietage/ai-workshop-start/issues/20) |
 | [organisation-cache.mp4](organisation-cache.mp4) | [organisation-cache.json](organisation-cache.json) | the cache of an organisation's scan, [#22](https://github.com/vietage/ai-workshop-start/issues/22) |
 | [nicer-skill-list.mp4](nicer-skill-list.mp4) | [nicer-skill-list.json](nicer-skill-list.json) | the gradient style, an organisation's repositories in a column, [#30](https://github.com/vietage/ai-workshop-start/issues/30) |
+| [repository-tabs.mp4](repository-tabs.mp4) | [repository-tabs.json](repository-tabs.json) | an organisation's repository in a tab of its own, in the page, [#37](https://github.com/vietage/ai-workshop-start/issues/37) |
 
 ## word-filter
 
@@ -84,3 +85,18 @@ The web view on `./fixture`, then the `Kotlin` organisation, on its default bran
 
 The CLI's bold names and dim links are drawn only when stdout is a terminal
 ([spec/cli.md](../../spec/cli.md)), which the recorder's terminal is not: it shows the plain text.
+
+## repository-tabs
+
+The web view on the `Kotlin` organisation, on its default branches:
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `github.com/Kotlin`, Scan | the `Kotlin` tab, its repositories | the organisation's own tab |
+| `kotlinx-rpc` selected | a `kotlinx-rpc ×` tab, active, its 17 skills | a repository in a tab inside the page |
+| `test` in the filter, a skill selected | 10 of 17 skills | each repository keeps its filter and skill |
+| the `Kotlin` tab | the repositories, nothing scanned again | switching tabs scans nothing |
+| `multik` selected | the same tab, now `multik ×`, its 2 skills | one repository tab, its contents changed |
+| `kotlinx-rpc` again | `test`, 10 of 17, the same skill, not scanned again | as it was left |
+| reload | the `kotlinx-rpc` tab, active, its filter and skill | the URL restores the active tab |
+| `×` | only the `Kotlin` tab, its repositories | closing the repository's tab |
