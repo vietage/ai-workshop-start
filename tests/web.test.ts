@@ -178,6 +178,45 @@ test('serve: a malformed request target → 400, and the server keeps running', 
   assert.equal((await get('/')).status, 200);
 });
 
+// Longer than Node's default 16 KB for a request's URL and headers: the issue's link.
+const LONG_LINK = `https://github.com/${'a'.repeat(20_000)}`;
+const LONG_PATH = `/no/such/${'a'.repeat(20_000)}`;
+
+test('API: a link over 16 KB → 400 and its scan\'s message as JSON, not a 431; with stream=1 too', async () => {
+  const github = await scan(LONG_LINK);
+  assert.equal(github.status, 400);
+  assert.match(github.body.error, new RegExp(`${'a'.repeat(20_000)}$`));
+  assert.deepEqual(await scan(LONG_PATH), { status: 400, body: { error: `Not a GitHub URL or a readable directory: ${LONG_PATH}` } });
+  const streamed = await get(`/api/scan?stream=1&repo=${encodeURIComponent(LONG_PATH)}`);
+  assert.deepEqual(
+    { status: streamed.status, type: streamed.type, body: JSON.parse(streamed.text) },
+    { status: 400, type: 'application/json; charset=utf-8', body: { error: `Not a GitHub URL or a readable directory: ${LONG_PATH}` } },
+  );
+});
+
+test('serve: the page\'s own URL with a link over 16 KB → the page', async () => {
+  const reload = await get(`/?repo=${encodeURIComponent(LONG_LINK)}&filter=commit`);
+  assert.equal(reload.status, 200);
+  assert.equal(reload.type, 'text/html; charset=utf-8');
+  assert.equal(reload.text, (await get('/')).text);
+});
+
+test('serve: a request over 4 MB → 400 and a message as JSON, and the server keeps running', { timeout: 10_000 }, async () => {
+  const answer = await new Promise<{ status?: number; type?: string; text: string }>((resolve, reject) => {
+    const path = `/api/scan?repo=${'a'.repeat(4 * 1024 * 1024 + 1)}`;
+    request({ host: '127.0.0.1', port, path, headers: { host: `localhost:${port}` } }, (response) => {
+      let text = '';
+      response.setEncoding('utf8').on('data', (chunk) => (text += chunk));
+      response.on('end', () => resolve({ status: response.statusCode, type: response.headers['content-type'], text }));
+    }).on('error', reject).end();
+  });
+  assert.deepEqual(
+    { ...answer, text: JSON.parse(answer.text) },
+    { status: 400, type: 'application/json; charset=utf-8', text: { error: 'The request is too long: at most 4 MB' } },
+  );
+  assert.equal((await get('/')).status, 200);
+});
+
 test('./skill-atlas serve stops with Ctrl+C', { timeout: 10_000 }, async () => {
   const child = spawn(process.execPath, [CLI, 'serve', '--port', '0'], { stdio: ['ignore', 'pipe', 'inherit'] });
   await new Promise<void>((resolve) => child.stdout.setEncoding('utf8').on('data', (text: string) => text.includes('Ctrl+C') && resolve()));
@@ -359,6 +398,55 @@ test('page: the URL keeps the link and the skill; reload shows the same', { time
     assert.equal(failed.shown('main'), false);
   } finally {
     failed.close();
+  }
+});
+
+test('page: a link over 16 KB → its scan\'s message, nothing else; reload shows the same', { timeout: 5_000 }, async () => {
+  const first = await page('/');
+  let href: string;
+  try {
+    await first.enter(LONG_PATH);
+    assert.equal(first.$('error').textContent, `Not a GitHub URL or a readable directory: ${LONG_PATH}`);
+    assert.equal(first.shown('main'), false);
+    assert.deepEqual(first.search(), { repo: LONG_PATH });
+    // Wrapped inside its box, not past the page's edge.
+    assert.equal(first.dom.window.getComputedStyle(first.$('error')).overflowWrap, 'anywhere');
+    href = first.dom.window.location.href;
+  } finally {
+    first.close();
+  }
+  const path = new URL(href).pathname + new URL(href).search;
+  // The server serves the page at that URL, as a browser's reload asks for it.
+  assert.equal((await get(path)).status, 200);
+  const reloaded = await page(path);
+  try {
+    await reloaded.settled(1);
+    assert.equal((reloaded.$('repo') as HTMLInputElement).value, LONG_PATH);
+    assert.equal(reloaded.$('error').textContent, `Not a GitHub URL or a readable directory: ${LONG_PATH}`);
+    assert.equal(reloaded.shown('main'), false);
+  } finally {
+    reloaded.close();
+  }
+});
+
+test('page: an answer that is not the API\'s JSON → The server answered <status>, not a parser\'s error', { timeout: 5_000 }, async () => {
+  // A stand-in server answering as Node does to a request it cannot read: a status, no body.
+  const { createServer } = await import('node:http');
+  const standIn = createServer((_request, response) => {
+    response.writeHead(431);
+    response.end();
+  });
+  await new Promise<void>((resolve) => standIn.listen(0, '127.0.0.1', resolve));
+  const at = String((standIn.address() as { port: number }).port);
+  const view = await page('/', at);
+  try {
+    await view.enter(FIXTURE);
+    assert.equal(view.$('error').textContent, 'The server answered 431 Request Header Fields Too Large');
+    assert.equal(view.shown('main'), false);
+    assert.equal(view.shown('progress'), false);
+  } finally {
+    view.close();
+    standIn.close();
   }
 });
 

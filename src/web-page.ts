@@ -69,7 +69,7 @@ export const PAGE = `<!doctype html>
   #repositories .count { padding: 0 8px; border-radius: 999px; font-size: 12px; color: var(--muted); background: #8b5cf61a; white-space: nowrap; }
   #org-warnings { margin: 8px 0 0; padding-left: 16px; font-size: 13px; color: var(--warning); }
   #org-warnings:empty { display: none; }
-  #error { margin: 16px 24px; padding: 10px 14px; border-radius: 10px; background: #e11d4822; color: #e11d48; white-space: pre-wrap; }
+  #error { margin: 16px 24px; padding: 10px 14px; border-radius: 10px; background: #e11d4822; color: #e11d48; white-space: pre-wrap; overflow-wrap: anywhere; }
   #error:empty { display: none; }
   #skill { padding: 18px 24px; overflow: auto; min-width: 0; }
   #skill h2 { margin: 0 0 4px; font-size: 18px; background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
@@ -145,12 +145,18 @@ function setUrl(repo, skill) {
   history.replaceState(null, '', query ? '?' + query : location.pathname);
 }
 
+/** A failed answer's message: its \`error\`, or its status when it is not the API's JSON. */
+async function failure(response) {
+  const body = await response.json().catch(() => undefined);
+  if (typeof body?.error === 'string') return new Error(body.error);
+  return new Error('The server answered ' + response.status + (response.statusText ? ' ' + response.statusText : ''));
+}
+
 /** The scan of a link: the API's answer, or its message as an error. */
 async function request(link) {
   const response = await fetch('/api/scan?repo=' + encodeURIComponent(link));
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error);
-  return body;
+  if (!response.ok) throw await failure(response);
+  return response.json();
 }
 
 /**
@@ -159,7 +165,7 @@ async function request(link) {
  */
 async function requestWithProgress(link, progress) {
   const response = await fetch('/api/scan?stream=1&repo=' + encodeURIComponent(link));
-  if (!response.ok) throw new Error((await response.json()).error);
+  if (!response.ok) throw await failure(response);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffered = '';
