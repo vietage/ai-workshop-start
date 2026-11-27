@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { request } from 'node:http';
+import { connect } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -175,6 +176,25 @@ test('serve: a malformed request target → 400, and the server keeps running', 
     }).on('error', reject).end();
   });
   assert.equal(status, 400);
+  assert.equal((await get('/')).status, 200);
+});
+
+test('serve: a malformed header → 400 and "Not a valid request" as JSON, and the server keeps running', { timeout: 5_000 }, async () => {
+  // A raw socket: node:http's client refuses to send a header line without a colon.
+  const answer = await new Promise<string>((resolve, reject) => {
+    const socket = connect({ host: '127.0.0.1', port: Number(port) }, () =>
+      socket.write(`GET / HTTP/1.1\r\nHost: localhost:${port}\r\nBad Header\r\n\r\n`),
+    );
+    let text = '';
+    socket.setEncoding('utf8').on('data', (chunk) => (text += chunk));
+    socket.on('end', () => resolve(text)).on('error', reject);
+  });
+  const [head, body] = answer.split('\r\n\r\n');
+  const lines = head.split('\r\n');
+  assert.equal(lines[0], 'HTTP/1.1 400 Bad Request');
+  assert.ok(lines.includes('content-type: application/json; charset=utf-8'), head);
+  assert.ok(lines.includes(`content-length: ${Buffer.byteLength(body)}`), head);
+  assert.deepEqual(JSON.parse(body), { error: 'Not a valid request' });
   assert.equal((await get('/')).status, 200);
 });
 

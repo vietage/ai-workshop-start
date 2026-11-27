@@ -75,6 +75,8 @@ and `content`, the SKILL.md text), `total` (the count before the filter), `warni
   - A request up to *4 MB*, its URL and headers (Node's default: 16 KB), more than a browser's
     URL: a long link → its scan's message; the page's own URL with it → the page
   - Longer → status 400, `{ "error": "The request is too long: at most 4 MB" }`, not a 431
+  - A request Node can't parse (a header line without a colon) → status 400,
+    `{ "error": "Not a valid request" }`, not Node's empty 400; the server keeps running
 - Each file is read once: the page shows the text the scan parsed
 - An organisation → JSON: `organisation` (`name`, `url`), `repositories` (each with `name`, `url`,
   `commit`, `skillCount`; `null` for one that failed), `skills` (their sum), `warnings`
