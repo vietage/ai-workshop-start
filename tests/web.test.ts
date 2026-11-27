@@ -764,6 +764,8 @@ test('page: the URL keeps the organisation and the repository; reload shows the 
     assert.equal(view.$('summary').textContent, `SkillAtlas/alpha · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
     assert.equal(view.selected(), 'web/.github/skills/two/SKILL.md');
     assert.equal(view.$('skill').querySelector('h2')!.textContent, 'two');
+    assert.deepEqual(tabNames(view), ['SkillAtlas', 'alpha']);
+    assert.equal(activeTab(view), 'alpha');
   } finally {
     view.close();
   }
@@ -779,7 +781,7 @@ test('page: the URL keeps the organisation and the repository; reload shows the 
   }
 });
 
-test('page: a repository of the organisation that fails → its message; the organisation stays', { timeout: 5_000 }, async () => {
+test('page: a repository of the organisation that fails → its message in the repository\'s tab; selected again → scanned again', { timeout: 5_000 }, async () => {
   const view = await page('/');
   try {
     await view.enter('github.com/skillatlas');
@@ -788,14 +790,305 @@ test('page: a repository of the organisation that fails → its message; the org
     broken.dispatchEvent(new view.dom.window.Event('click'));
     await view.settled(scans + 1);
     assert.equal(view.$('error').textContent, 'GitHub rate limit reached; try again in a minute');
-    assert.equal(view.$('organisation').hidden, false);
+    assert.deepEqual(tabNames(view), ['SkillAtlas', 'broken']);
+    assert.equal(activeTab(view), 'broken');
+    assert.equal(view.$('organisation').hidden, true);
     assert.equal(view.$('main').hidden, true);
     assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'broken' });
-    // A repository link after it: no organisation.
+    // The organisation's tab: its repositories, no error; back to the failed one: its message again.
+    clickTab(view, 'SkillAtlas');
+    assert.equal(view.$('organisation').hidden, false);
+    assert.equal(view.$('error').textContent, '');
+    clickTab(view, 'broken');
+    assert.equal(view.$('error').textContent, 'GitHub rate limit reached; try again in a minute');
+    assert.equal(view.scans(), scans + 1);
+    // Selected again in the list: scanned again.
+    clickTab(view, 'SkillAtlas');
+    await openRepository(view, 'broken');
+    assert.equal(view.scans(), scans + 2);
+    assert.equal(view.$('error').textContent, 'GitHub rate limit reached; try again in a minute');
+    // A repository link after it: no organisation, no tabs.
     await view.enter('https://github.com/JetBrains/example');
     assert.equal(view.$('organisation').hidden, true);
+    assert.equal(view.$('tabs').hidden, true);
     assert.equal(view.$('error').textContent, '');
     assert.deepEqual(view.search(), { repo: 'https://github.com/JetBrains/example', skill: '.claude/skills/commits/SKILL.md' });
+  } finally {
+    view.close();
+  }
+});
+
+type View = Awaited<ReturnType<typeof page>>;
+const tabsOf = (view: View) => [...view.$('tabs').children] as HTMLElement[];
+const tabNames = (view: View) => tabsOf(view).map((tab) => view.text(tab, '.label'));
+const activeTab = (view: View) => tabNames(view)[tabsOf(view).findIndex((tab) => tab.getAttribute('aria-selected') === 'true')];
+const tabNamed = (view: View, name: string) => tabsOf(view).find((tab) => view.text(tab, '.label') === name)!;
+const clickTab = (view: View, name: string) => tabNamed(view, name).dispatchEvent(new view.dom.window.Event('click', { bubbles: true }));
+const closeTab = (view: View, name: string) =>
+  tabNamed(view, name).querySelector('.close')!.dispatchEvent(new view.dom.window.Event('click', { bubbles: true }));
+/** Clicks a repository in the organisation's list and waits for what it scans. */
+async function openRepository(view: View, name: string) {
+  const scans = view.scans();
+  const item = [...view.$('repositories').children].find((node) => (node as HTMLElement).dataset.name === name)!;
+  item.dispatchEvent(new view.dom.window.Event('click'));
+  await view.settled(scans);
+}
+const marked = (view: View) =>
+  ([...view.$('repositories').children] as HTMLElement[]).filter((item) => item.getAttribute('aria-selected') === 'true').map((item) => item.dataset.name);
+
+test('page: an organisation → its own tab; a repository selected → its skills in the repository\'s tab, in the page', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    assert.equal(view.$('tabs').hidden, false);
+    assert.equal(view.$('tabs').getAttribute('role'), 'tablist');
+    assert.deepEqual(tabNames(view), ['SkillAtlas']);
+    assert.equal(activeTab(view), 'SkillAtlas');
+    // The organisation's tab cannot be closed.
+    assert.equal(tabsOf(view)[0].querySelector('.close'), null);
+    await openRepository(view, 'Beta');
+    assert.deepEqual(tabNames(view), ['SkillAtlas', 'Beta']);
+    assert.equal(activeTab(view), 'Beta');
+    assert.equal(tabNamed(view, 'Beta').querySelector('.close')!.getAttribute('aria-label'), 'Close Beta');
+    // Inside the page: the repository's skills, the organisation's list hidden, not a link elsewhere.
+    assert.equal(view.$('organisation').hidden, true);
+    assert.equal(view.$('main').hidden, false);
+    assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    assert.deepEqual(view.names(), ['four', 'three']);
+    assert.equal(view.shown('organisation'), false);
+    assert.equal(view.shown('skills'), true);
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'Beta', skill: '.agents/skills/four/SKILL.md' });
+  } finally {
+    view.close();
+  }
+});
+
+test('page: switching back to the organisation\'s tab, and to the repository\'s, scans nothing again', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    await openRepository(view, 'Beta');
+    const scans = view.scans();
+    clickTab(view, 'SkillAtlas');
+    assert.equal(activeTab(view), 'SkillAtlas');
+    assert.equal(view.$('organisation').hidden, false);
+    assert.equal(view.$('main').hidden, true);
+    assert.equal(view.$('org-summary').textContent, 'SkillAtlas · 7 repositories · 6 skills');
+    assert.equal(view.$('repositories').children.length, 4);
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas' });
+    // The repository in its tab: still marked in the list.
+    assert.deepEqual(marked(view), ['Beta']);
+    clickTab(view, 'Beta');
+    assert.equal(view.$('organisation').hidden, true);
+    assert.deepEqual(view.names(), ['four', 'three']);
+    // Selected again in the list: its tab, not a second one, not scanned again.
+    clickTab(view, 'SkillAtlas');
+    await openRepository(view, 'Beta');
+    assert.deepEqual(tabNames(view), ['SkillAtlas', 'Beta']);
+    assert.equal(activeTab(view), 'Beta');
+    assert.equal(view.scans(), scans);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: one repository\'s tab, its contents changed; each repository opened keeps its skill and filter', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    await openRepository(view, 'alpha');
+    view.items()[1].dispatchEvent(new view.dom.window.Event('click'));
+    view.filter('two');
+    assert.deepEqual(view.names(), ['two']);
+    clickTab(view, 'SkillAtlas');
+    await openRepository(view, 'Beta');
+    // One tab, now Beta's; Beta marked in the list, alone.
+    assert.deepEqual(tabNames(view), ['SkillAtlas', 'Beta']);
+    assert.equal(activeTab(view), 'Beta');
+    assert.deepEqual(marked(view), ['Beta']);
+    // Opened for the first time: no filter.
+    assert.equal((view.$('filter') as HTMLInputElement).value, '');
+    assert.deepEqual(view.names(), ['four', 'three']);
+    view.items()[1].dispatchEvent(new view.dom.window.Event('click'));
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'Beta', skill: '.agents/skills/three/SKILL.md' });
+    // alpha again: as it was left, not scanned again.
+    const scans = view.scans();
+    clickTab(view, 'SkillAtlas');
+    await openRepository(view, 'alpha');
+    assert.deepEqual(tabNames(view), ['SkillAtlas', 'alpha']);
+    assert.deepEqual(marked(view), ['alpha']);
+    assert.equal((view.$('filter') as HTMLInputElement).value, 'two');
+    assert.deepEqual(view.names(), ['two']);
+    assert.equal(view.selected(), 'web/.github/skills/two/SKILL.md');
+    assert.equal(view.$('summary').textContent, `SkillAtlas/alpha · 1 of 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'alpha', skill: 'web/.github/skills/two/SKILL.md', filter: 'two' });
+    clickTab(view, 'SkillAtlas');
+    await openRepository(view, 'Beta');
+    assert.equal(view.selected(), '.agents/skills/three/SKILL.md');
+    assert.equal((view.$('filter') as HTMLInputElement).value, '');
+    assert.equal(view.scans(), scans);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: × closes the repository\'s tab → the organisation\'s, nothing scanned, nothing forgotten', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    await openRepository(view, 'alpha');
+    view.items()[1].dispatchEvent(new view.dom.window.Event('click'));
+    view.filter('two');
+    const scans = view.scans();
+    closeTab(view, 'alpha');
+    assert.deepEqual(tabNames(view), ['SkillAtlas']);
+    assert.equal(activeTab(view), 'SkillAtlas');
+    assert.equal(view.$('organisation').hidden, false);
+    assert.equal(view.$('main').hidden, true);
+    assert.deepEqual(marked(view), []);
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas' });
+    // Selected again: its tab as it was left, not scanned again.
+    await openRepository(view, 'alpha');
+    assert.deepEqual(tabNames(view), ['SkillAtlas', 'alpha']);
+    assert.equal((view.$('filter') as HTMLInputElement).value, 'two');
+    assert.equal(view.selected(), 'web/.github/skills/two/SKILL.md');
+    assert.equal(view.scans(), scans);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: the repository\'s tab while it scans → Scanning <repo>…; left before it is done → kept, not shown', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    const scans = view.scans();
+    const click = (name: string) =>
+      [...view.$('repositories').children].find((node) => (node as HTMLElement).dataset.name === name)!.dispatchEvent(new view.dom.window.Event('click'));
+    click('Beta');
+    assert.equal(activeTab(view), 'Beta');
+    assert.equal(view.$('loading').hidden, false);
+    assert.equal(view.$('loading').textContent, 'Scanning Beta…');
+    assert.equal(view.$('main').hidden, true);
+    assert.equal(view.$('organisation').hidden, true);
+    clickTab(view, 'SkillAtlas');
+    assert.equal(view.$('loading').hidden, true);
+    await view.settled(scans + 1);
+    // Done while the organisation's tab is active: it stays.
+    assert.equal(activeTab(view), 'SkillAtlas');
+    assert.equal(view.$('organisation').hidden, false);
+    assert.equal(view.$('main').hidden, true);
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas' });
+    clickTab(view, 'Beta');
+    assert.deepEqual(view.names(), ['four', 'three']);
+    assert.equal(view.scans(), scans + 1);
+    // alpha selected, then Beta before alpha is done: Beta's skills stay; alpha kept.
+    clickTab(view, 'SkillAtlas');
+    click('alpha');
+    clickTab(view, 'SkillAtlas');
+    click('Beta');
+    await view.settled(scans + 2);
+    assert.deepEqual(tabNames(view), ['SkillAtlas', 'Beta']);
+    assert.deepEqual(view.names(), ['four', 'three']);
+    clickTab(view, 'SkillAtlas');
+    await openRepository(view, 'alpha');
+    assert.deepEqual(view.names(), ['one', 'two']);
+    // Closed before it is done: nothing shown when it is.
+    clickTab(view, 'SkillAtlas');
+    click('example-tools');
+    closeTab(view, 'example-tools');
+    await view.settled(scans + 3);
+    assert.deepEqual(tabNames(view), ['SkillAtlas']);
+    assert.equal(view.$('organisation').hidden, false);
+    assert.equal(view.$('main').hidden, true);
+    assert.equal(view.scans(), scans + 3);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: the URL keeps the active tab; reload restores it, with its skill and filter', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  let url: string;
+  try {
+    await view.enter('github.com/skillatlas');
+    await openRepository(view, 'Beta');
+    clickTab(view, 'SkillAtlas');
+    await openRepository(view, 'alpha');
+    view.items()[1].dispatchEvent(new view.dom.window.Event('click'));
+    view.filter('two');
+    url = view.dom.window.location.pathname + view.dom.window.location.search;
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'alpha', skill: 'web/.github/skills/two/SKILL.md', filter: 'two' });
+  } finally {
+    view.close();
+  }
+  const reloaded = await page(url);
+  try {
+    await reloaded.settled(2);
+    assert.deepEqual(tabNames(reloaded), ['SkillAtlas', 'alpha']);
+    assert.equal(activeTab(reloaded), 'alpha');
+    assert.equal(reloaded.$('organisation').hidden, true);
+    assert.equal((reloaded.$('filter') as HTMLInputElement).value, 'two');
+    assert.deepEqual(reloaded.names(), ['two']);
+    assert.equal(reloaded.selected(), 'web/.github/skills/two/SKILL.md');
+    // Back to the organisation: its repositories, from the same scan.
+    clickTab(reloaded, 'SkillAtlas');
+    assert.equal(reloaded.$('organisation').hidden, false);
+    assert.equal(reloaded.$('repositories').children.length, 4);
+    assert.deepEqual(reloaded.search(), { repo: 'github.com/skillatlas' });
+    assert.equal(reloaded.scans(), 2);
+    // Beta was opened before the reload: not kept, scanned now.
+    await openRepository(reloaded, 'Beta');
+    assert.equal(reloaded.scans(), 3);
+  } finally {
+    reloaded.close();
+  }
+  // The organisation's tab active: only it, after a reload.
+  const organisation = await page(`/?repo=${encodeURIComponent('github.com/skillatlas')}`);
+  try {
+    await organisation.settled(1);
+    assert.deepEqual(tabNames(organisation), ['SkillAtlas']);
+    assert.equal(activeTab(organisation), 'SkillAtlas');
+  } finally {
+    organisation.close();
+  }
+});
+
+test('page: another link entered → the tabs closed; a repository link has no tabs', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    await openRepository(view, 'Beta');
+    await view.enter('github.com/skillatlas');
+    assert.deepEqual(tabNames(view), ['SkillAtlas']);
+    assert.equal(activeTab(view), 'SkillAtlas');
+    assert.deepEqual(marked(view), []);
+    // The repositories opened are forgotten: scanned again.
+    const scans = view.scans();
+    await openRepository(view, 'Beta');
+    assert.equal(view.scans(), scans + 1);
+    await view.enter(FIXTURE);
+    assert.equal(view.$('tabs').hidden, true);
+    assert.equal(view.shown('tabs'), false);
+    assert.equal(view.$('main').hidden, false);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a gradient style: the tabs on rounded cards, the active one tinted with an accent bar', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    await openRepository(view, 'Beta');
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    const [organisation, beta] = tabsOf(view);
+    for (const tab of [organisation, beta]) assert.match(style(tab).borderRadius, /^[1-9]\d*px$/);
+    assert.match(style(beta).backgroundImage, /^linear-gradient\(/);
+    assert.match(style(beta).boxShadow, /\binset\b/);
+    assert.doesNotMatch(style(organisation).backgroundImage, /gradient/);
+    assert.doesNotMatch(style(organisation).boxShadow, /\binset\b/);
+    assert.equal(style(view.$('tabs')).display, 'flex');
   } finally {
     view.close();
   }
@@ -808,6 +1101,8 @@ test('page: repositories with 0 skills not listed; one in the URL → the organi
       await view.settled(1);
       assert.equal(view.scans(), 1);
       assert.equal(view.$('organisation').hidden, false);
+      assert.deepEqual(tabNames(view), ['SkillAtlas']);
+      assert.equal(activeTab(view), 'SkillAtlas');
       assert.ok(![...view.$('repositories').children].some((item) => (item as HTMLElement).dataset.name === name), name);
       assert.equal(view.$('error').textContent, '');
       assert.equal(view.$('main').hidden, true);

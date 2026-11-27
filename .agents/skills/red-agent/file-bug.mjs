@@ -97,13 +97,21 @@ function uploadVideo(repo, video, name) {
   return `https://github.com/${repo}/releases/download/${RELEASE}/${encodeURIComponent(name)}`;
 }
 
+const OPTIONS = {
+  key: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, video: { type: 'string' },
+  commit: { type: 'string' }, 'dry-run': { type: 'boolean' },
+};
+
 function main() {
-  const { values } = parseArgs({
-    options: {
-      key: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, video: { type: 'string' },
-      commit: { type: 'string' }, 'dry-run': { type: 'boolean' },
-    },
-  });
+  let values;
+  try {
+    ({ values } = parseArgs({ options: OPTIONS }));
+  } catch (error) {
+    // An unknown option, one without its value, or an argument: invalid input, not a gh failure.
+    if (!error.code?.startsWith('ERR_PARSE_ARGS_')) throw error;
+    console.error(error.message.split('\n')[0]);
+    process.exit(2);
+  }
   let body;
   if (values.body !== undefined) {
     try { body = readFileSync(values.body, 'utf8'); } catch { body = undefined; }

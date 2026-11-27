@@ -1,0 +1,30 @@
+{
+  "serve": true,
+  "steps": [
+    { "goto": "/", "pause": 800 },
+    { "caption": "An organisation: its repositories in its own tab" },
+    { "type": "#repo", "text": "github.com/Kotlin", "pause": 300 },
+    { "click": "#scan" },
+    { "waitFor": "#repositories li", "timeout": 180000, "pause": 2500 },
+    { "caption": "A repository selected → its skills in a tab of its own, in the page" },
+    { "click": "#repositories li[data-name=\"kotlinx-rpc\"]" },
+    { "waitFor": "#skills li", "timeout": 60000, "pause": 2500 },
+    { "caption": "Its own filter and selected skill" },
+    { "type": "#filter", "text": "test", "pause": 800 },
+    { "click": "#skills li:nth-child(2)", "pause": 2000 },
+    { "caption": "Back to the organisation's tab: nothing scanned again" },
+    { "click": "#tabs [role=\"tab\"]:first-child", "pause": 2500 },
+    { "caption": "Another repository: the same tab, its contents changed" },
+    { "click": "#repositories li[data-name=\"multik\"]" },
+    { "waitFor": "#summary strong", "timeout": 60000, "pause": 3000 },
+    { "caption": "kotlinx-rpc again: as it was left, its filter and skill" },
+    { "click": "#tabs [role=\"tab\"]:first-child", "pause": 1200 },
+    { "click": "#repositories li[data-name=\"kotlinx-rpc\"]", "pause": 3000 },
+    { "caption": "Reload: the URL restores the active tab, its skill and its filter" },
+    { "reload": true },
+    { "waitFor": "#skills li", "timeout": 60000, "pause": 3000 },
+    { "caption": "× closes the repository's tab: back to the organisation's" },
+    { "click": "#tabs .close", "pause": 3000 },
+    { "caption": "", "pause": 500 }
+  ]
+}

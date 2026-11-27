@@ -26,6 +26,8 @@ An agent that tries to *break the web view* on its own and files an issue per bu
   `## Actual`
 - Invalid input (a bad key, no title, a section missing, an *Expected* without `spec/`, no video or
   an empty one) → every problem on stderr, exit 2, nothing filed
+- An unknown option, an option without its value, or an argument that is not an option → its
+  message on stderr in one line, no stack trace, exit 2, nothing filed
 - **Issue**: title `[Red agent] <title>`; labels `Delegated to AI`, `bug`, `red-agent`, created if
   missing; body: the commit tested (`HEAD`, or `--commit`), the video's link, the sections, the
   marker `<!-- red-agent: <key> -->`
