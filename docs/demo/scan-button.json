@@ -1,0 +1,23 @@
+{
+  "serve": true,
+  "steps": [
+    { "goto": "/", "pause": 800 },
+    { "caption": "While a scan runs, the button says Scanning… and is disabled" },
+    { "type": "#repo", "text": "github.com/Kotlin", "pause": 300 },
+    { "click": "#scan", "pause": 2500 },
+    { "waitFor": "#org-summary strong", "timeout": 120000 },
+    { "caption": "The organisation scanned: Scan, enabled again", "pause": 2500 },
+    { "caption": "A repository opened: Scanning…, then Scan once its skills are shown" },
+    { "click": "#repositories li[data-name=\"kotlinx-rpc\"]" },
+    { "waitFor": "#scan:enabled", "pause": 2500 },
+    { "caption": "Two opened one after the other: Scan once the last one is shown" },
+    { "click": "#repositories li:nth-child(3)", "pause": 100 },
+    { "click": "#repositories li:nth-child(2)" },
+    { "waitFor": "#scan:enabled", "pause": 2500 },
+    { "caption": "A failed scan: its message, and Scan, enabled" },
+    { "fill": "#repo" },
+    { "type": "#repo", "text": "/no/such/directory", "pause": 300 },
+    { "click": "#scan" },
+    { "waitFor": "#error:not(:empty)", "pause": 2500 }
+  ]
+}

@@ -986,3 +986,170 @@ test('page: another link entered while an organisation is scanned → its progre
     stopped.close();
   }
 });
+
+/**
+ * A server whose scan of a repository whose link contains `stalled` waits until `release`; the
+ * others as on the server above. `reached` once such a scan started.
+ */
+async function stalledServer(stalled: string) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let reached!: () => void;
+  const started = new Promise<void>((resolve) => (reached = resolve));
+  const options: WebOptions = {
+    async open(input) {
+      if (input.includes(stalled)) {
+        reached();
+        await gate;
+      }
+      return open(input);
+    },
+    scanOrganisation,
+  };
+  const { server, url } = await serve({ ...options, port: 0 });
+  return { port: new URL(url).port, started, release, close: () => (release(), server.closeAllConnections(), server.close()) };
+}
+
+/** The Scan button: its label, and whether it is enabled. */
+const button = (view: Awaited<ReturnType<typeof page>>) => {
+  const scan = view.$('scan') as HTMLButtonElement;
+  return [scan.textContent, !scan.disabled];
+};
+
+test('page: the Scan button → Scanning…, disabled, while a scan runs; Scan, enabled, once it succeeds', { timeout: 5_000 }, async () => {
+  const stalled = await stalledServer('JetBrains/example');
+  const view = await page('/', stalled.port);
+  try {
+    assert.deepEqual(button(view), ['Scan', true]);
+    (view.$('repo') as HTMLInputElement).value = 'https://github.com/JetBrains/example';
+    view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+    await stalled.started;
+    assert.deepEqual(button(view), ['Scanning…', false]);
+    stalled.release();
+    await view.settled(1);
+    assert.equal(view.$('summary').textContent, `JetBrains/example · 1 skill · ${EXAMPLE_COMMIT.slice(0, 12)}`);
+    assert.deepEqual(button(view), ['Scan', true]);
+  } finally {
+    view.close();
+    stalled.close();
+  }
+});
+
+test('page: the Scan button → Scan, enabled, once a scan fails, before or after some progress', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/no-such-organisation');
+    assert.equal(view.$('error').textContent, 'Organisation not found: https://github.com/no-such-organisation');
+    assert.deepEqual(button(view), ['Scan', true]);
+  } finally {
+    view.close();
+  }
+  const stopped = await stoppedServer(1, 3);
+  const failing = await page('/', stopped.port);
+  try {
+    (failing.$('repo') as HTMLInputElement).value = 'github.com/skillatlas';
+    failing.$('form').dispatchEvent(new failing.dom.window.Event('submit', { cancelable: true }));
+    await stopped.stopped;
+    assert.deepEqual(button(failing), ['Scanning…', false]);
+    stopped.fail(new AtlasError('Cannot reach GitHub: connection reset'));
+    await failing.settled(1);
+    assert.equal(failing.$('error').textContent, 'Cannot reach GitHub: connection reset');
+    assert.deepEqual(button(failing), ['Scan', true]);
+  } finally {
+    failing.close();
+    stopped.close();
+  }
+});
+
+test('page: the Scan button → Scan, enabled, once an organisation is scanned; an earlier scan still running does not hold it', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    assert.equal(view.$('org-summary').textContent, 'SkillAtlas · 7 repositories · 6 skills');
+    assert.deepEqual(button(view), ['Scan', true]);
+  } finally {
+    view.close();
+  }
+  // An organisation scan that never ends, replaced by another link: the button follows the latest.
+  const stopped = await stoppedServer(1, 3);
+  const replaced = await page('/', stopped.port);
+  try {
+    (replaced.$('repo') as HTMLInputElement).value = 'github.com/skillatlas';
+    replaced.$('form').dispatchEvent(new replaced.dom.window.Event('submit', { cancelable: true }));
+    await stopped.stopped;
+    (replaced.$('repo') as HTMLInputElement).value = 'https://github.com/JetBrains/example';
+    replaced.$('form').dispatchEvent(new replaced.dom.window.Event('submit', { cancelable: true }));
+    while (replaced.$('main').hidden) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(replaced.$('summary').textContent, `JetBrains/example · 1 skill · ${EXAMPLE_COMMIT.slice(0, 12)}`);
+    assert.deepEqual(button(replaced), ['Scan', true]);
+    // The earlier one ending later changes nothing.
+    stopped.finish();
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(replaced.$('organisation').hidden, true);
+    assert.deepEqual(button(replaced), ['Scan', true]);
+  } finally {
+    replaced.close();
+    stopped.close();
+  }
+});
+
+test('page: the Scan button → Scan, enabled, once the repository last opened from an organisation is shown', { timeout: 5_000 }, async () => {
+  const stalled = await stalledServer('/alpha/');
+  const view = await page('/', stalled.port);
+  try {
+    await view.enter('github.com/skillatlas');
+    const repositories = [...view.$('repositories').children] as HTMLElement[];
+    const scans = view.scans();
+    // alpha never answers; Beta, opened after it, does.
+    repositories[0].dispatchEvent(new view.dom.window.Event('click'));
+    await stalled.started;
+    assert.deepEqual(button(view), ['Scanning…', false]);
+    repositories[1].dispatchEvent(new view.dom.window.Event('click'));
+    await view.settled(scans + 2);
+    assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    assert.deepEqual(button(view), ['Scan', true]);
+    // alpha answering later changes nothing.
+    stalled.release();
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    assert.deepEqual(button(view), ['Scan', true]);
+  } finally {
+    view.close();
+    stalled.close();
+  }
+  // Reloaded with a repository: the organisation, then it; the button once it is shown.
+  const reloaded = await page(`/?repo=${encodeURIComponent('github.com/skillatlas')}&repository=Beta`);
+  try {
+    await reloaded.settled(2);
+    assert.equal(reloaded.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    assert.deepEqual(button(reloaded), ['Scan', true]);
+  } finally {
+    reloaded.close();
+  }
+});
+
+test('page: a repository of the organisation clicked while another link is scanned → nothing; the button waits for that link', { timeout: 5_000 }, async () => {
+  const stalled = await stalledServer('JetBrains/example');
+  const view = await page('/', stalled.port);
+  try {
+    await view.enter('github.com/skillatlas');
+    const beta = [...view.$('repositories').children][1] as HTMLElement;
+    (view.$('repo') as HTMLInputElement).value = 'https://github.com/JetBrains/example';
+    view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+    await stalled.started;
+    const scans = view.scans();
+    beta.dispatchEvent(new view.dom.window.Event('click'));
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(view.scans(), scans);
+    assert.equal(view.$('error').textContent, '');
+    assert.deepEqual(button(view), ['Scanning…', false]);
+    stalled.release();
+    await view.settled(scans);
+    assert.equal(view.$('organisation').hidden, true);
+    assert.equal(view.$('summary').textContent, `JetBrains/example · 1 skill · ${EXAMPLE_COMMIT.slice(0, 12)}`);
+    assert.deepEqual(button(view), ['Scan', true]);
+  } finally {
+    view.close();
+    stalled.close();
+  }
+});

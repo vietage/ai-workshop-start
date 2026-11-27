@@ -15,6 +15,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [failed-scan.mp4](failed-scan.mp4) | [failed-scan.json](failed-scan.json) | a failed scan shows its message and nothing else, [#20](https://github.com/vietage/ai-workshop-start/issues/20) |
 | [organisation-cache.mp4](organisation-cache.mp4) | [organisation-cache.json](organisation-cache.json) | the cache of an organisation's scan, [#22](https://github.com/vietage/ai-workshop-start/issues/22) |
 | [nicer-skill-list.mp4](nicer-skill-list.mp4) | [nicer-skill-list.json](nicer-skill-list.json) | the gradient style, an organisation's repositories in a column, [#30](https://github.com/vietage/ai-workshop-start/issues/30) |
+| [scan-button.mp4](scan-button.mp4) | [scan-button.json](scan-button.json) | the Scan button back to `Scan` once the latest scan ends, [#34](https://github.com/vietage/ai-workshop-start/issues/34) |
 
 ## word-filter
 
@@ -84,3 +85,18 @@ The web view on `./fixture`, then the `Kotlin` organisation, on its default bran
 
 The CLI's bold names and dim links are drawn only when stdout is a terminal
 ([spec/cli.md](../../spec/cli.md)), which the recorder's terminal is not: it shows the plain text.
+
+## scan-button
+
+The web view on the `Kotlin` organisation, on its default branches, then a directory that does
+not exist:
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `github.com/Kotlin`, Scan | `Scanning…`, disabled; `Scan` once the repositories are shown | the button while a scan runs, and after |
+| `kotlinx-rpc` selected | `Scanning…`, then `Scan` with its skills | a repository opened from an organisation |
+| `dataframe`, then `multik` at once | `Scan` once `multik` is shown | the button follows the latest scan only |
+| `/no/such/directory`, Scan | its message, `Scan`, enabled | after a failure too |
+
+A scan that never ends (the case of [#34](https://github.com/vietage/ai-workshop-start/issues/34))
+cannot be recorded against GitHub; `tests/web.test.ts` stalls one in a stand-in server.
