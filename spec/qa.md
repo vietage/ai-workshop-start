@@ -12,6 +12,7 @@ The web view in a real browser, scenario by scenario: `qa/`
   - A skipped or passed scenario → no issue
 - The **manual-qa skill** (`.agents/skills/manual-qa`): runs it, sorts the failures into product
   bugs and the rest, files the product bugs
+- Beyond the scenarios: the red agent, `spec/red-agent.md`
 ## End-to-end on CI
 The same scenarios, scripts and helpers, as end-to-end tests: one suite. `npm run e2e [-- <args>]`
 - Runs in the official **Playwright Docker image** of the installed `@playwright/test` version

@@ -52,6 +52,9 @@ pull request, and compares the screenshots of their key moments with the Linux b
 - [issue-to-pr](.agents/skills/issue-to-pr/SKILL.md): an agent implements an issue and opens a PR; it
   asks the decisions the issue leaves open in Slack `#my-ai-workshop` and waits for the thread's reply
   ([spec/issue-to-pr.md](spec/issue-to-pr.md)).
+- [red-agent](.agents/skills/red-agent/SKILL.md): an agent tries to break the web view beyond the QA
+  scenarios and files an issue per bug, with the steps, what the spec expects and a video, labelled
+  `Delegated to AI` so that issue-to-pr fixes it ([spec/red-agent.md](spec/red-agent.md)).
 - [memory/](memory/README.md): notes agents leave for the next task, what a task learned; written
   at the end of a task by the [update-memory](.agents/skills/update-memory/SKILL.md) skill, and
   never reviewed.
