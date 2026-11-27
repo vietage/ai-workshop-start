@@ -152,7 +152,7 @@ test('--filter <words> with no match → the words in the message, joined by one
 });
 
 test('--filter without words, an empty or blank one, twice, or followed by --filter → the usage, exit code 1', async () => {
-  const usage = 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <words>]';
+  const usage = 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <words>] [--no-cache]';
   for (const args of [
     [FIXTURE, '--filter'],
     [FIXTURE, '--filter', ''],
@@ -643,12 +643,15 @@ test('progress bar: filled in proportion, 1 repository, and full for 0 of 0', ()
   assert.equal(progressBar(0, 0), '[####################] 0/0 repositories');
 });
 
-test('./skill-atlas scan github.com/<org>: on a terminal, the bar redrawn on one line on stderr, then erased; piped, none', () => {
-  // The real CLI, GitHub answered from the recordings; `TERMINAL=1`: stderr is a terminal.
+test('./skill-atlas scan github.com/<org>: on a terminal, the bar redrawn on one line on stderr, then erased; piped, none', (t) => {
+  // The real CLI, GitHub answered from the recordings; `TERMINAL=1`: stderr is a terminal. Its
+  // cache in a directory of the test's own, not in the user's.
+  const cache = mkdtempSync(join(tmpdir(), 'skill-atlas-'));
+  t.after(() => rmSync(cache, { recursive: true, force: true }));
   const cli = (terminal: boolean) =>
     spawnSync(process.execPath, ['--import', TERMINAL, CLI, 'scan', 'github.com/skillatlas'], {
       encoding: 'utf8',
-      env: { ...process.env, TERMINAL: terminal ? '1' : '' },
+      env: { ...process.env, TERMINAL: terminal ? '1' : '', SKILL_ATLAS_CACHE: join(cache, 'cache.db') },
     });
   const piped = cli(false);
   assert.equal(piped.status, 0, piped.stderr);

@@ -13,6 +13,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [word-filter.mp4](word-filter.mp4) | [word-filter.json](word-filter.json) | the filter by several words, [#13](https://github.com/vietage/ai-workshop-start/issues/13) |
 | [scan-progress.mp4](scan-progress.mp4) | [scan-progress.json](scan-progress.json) | the progress bar of an organisation's scan, [#18](https://github.com/vietage/ai-workshop-start/issues/18) |
 | [failed-scan.mp4](failed-scan.mp4) | [failed-scan.json](failed-scan.json) | a failed scan shows its message and nothing else, [#20](https://github.com/vietage/ai-workshop-start/issues/20) |
+| [organisation-cache.mp4](organisation-cache.mp4) | [organisation-cache.json](organisation-cache.json) | the cache of an organisation's scan, [#22](https://github.com/vietage/ai-workshop-start/issues/22) |
 
 ## word-filter
 
@@ -50,3 +51,21 @@ The web view on `./fixture`, then a directory that does not exist:
 | `./fixture`, Scan | 4 skills, the filter, the SKILL.md of `code-style`, warnings | a scan that works |
 | `/no/such/directory`, Scan | its message only; the Scan button enabled | a failed scan → its message, nothing else |
 | reload | the same message | the URL keeps the failed link |
+
+## organisation-cache
+
+The CLI on the `Kotlin` organisation, on its default branches (107 repositories), then the web view.
+Recorded with a cache of its own, which the script removes first, and the time of each scan:
+
+```bash
+SKILL_ATLAS_CACHE=/tmp/skill-atlas-demo/cache.db TIMEFORMAT='%R s' \
+  node .agents/skills/record-demo/record.mjs docs/demo/organisation-cache.json docs/demo/organisation-cache.mp4
+```
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `scan github.com/Kotlin`, no cache yet | its repositories, 11.2 s | every repository is fetched, and kept |
+| the same again | the same output, 7.5 s | only each repository's commit is asked for; no tree, no file |
+| `--no-cache` | the same output, 10.8 s | every repository scanned again, the entries replaced |
+| the file overwritten with `garbage` | the same output, `cache.db.corrupt`, `warning: cache: …` | a broken cache never fails a scan |
+| the web view, `github.com/Kotlin` | the same repositories and counts | one cache for the CLI and the web view |

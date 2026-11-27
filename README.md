@@ -21,6 +21,13 @@ An organisation, or a user: `./skill-atlas scan github.com/JetBrains` lists its 
 with its skill count, the most first; archived repositories and forks are skipped. While it scans, a
 progress bar shows how many repositories are done, in the terminal and in the web view.
 
+An organisation's scan remembers each repository's skill count, warnings and commit in a local SQLite
+cache, `~/.cache/skill-atlas/cache.db` (or in `XDG_CACHE_HOME`; `SKILL_ATLAS_CACHE=<file>` for another
+place), shared by the CLI and the web view. The next scan asks only for each repository's current
+commit and fetches again only the ones that changed; the output is the same.
+`./skill-atlas scan github.com/JetBrains --no-cache` scans everything again; deleting the file clears
+the cache, and a missing or broken one never fails a scan. One repository's scan stores nothing.
+
 Or in a browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
 for the repository or organisation link, its skills (with a field to filter them) and each one's SKILL.md
 (`--port <port>` for another port).

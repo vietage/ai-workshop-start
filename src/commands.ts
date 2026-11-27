@@ -9,8 +9,11 @@ import { scan, type Source } from './core/scan.ts';
 export type Context = {
   /** Opens what the user asked to scan. */
   open(input: string): Promise<Source>;
-  /** Scans every repository of a GitHub organisation, or of a user; `progress` as each one is done. */
-  scanOrganisation(input: string, progress?: Progress): Promise<OrganisationResult>;
+  /**
+   * Scans every repository of a GitHub organisation, or of a user; `progress` as each one is done;
+   * with `refresh`, every repository again, whatever the cache has.
+   */
+  scanOrganisation(input: string, progress?: Progress, refresh?: boolean): Promise<OrganisationResult>;
   print(text: string): void;
   /** Errors and warnings. */
   error(text: string): void;
@@ -28,6 +31,7 @@ const usage = `Usage: skill-atlas <command>
   scan <GitHub URL | directory>   find every SKILL.md in a repository and print it
     --filter <words>              only the skills whose name or description contains every word
   scan github.com/<organisation>  list its repositories, each with its skill count
+    --no-cache                    scan every repository again, not only the changed ones
   serve [--port <port>]           open a local web view, at http://localhost:4173 by default
   help                            show this help`;
 
@@ -47,13 +51,16 @@ export async function run(args: string[], context: Context): Promise<number> {
   }
 }
 
-const scanUsage = 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <words>]';
+const scanUsage = 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <words>] [--no-cache]';
 
 async function scanCommand(args: string[], context: Context) {
   const inputs: string[] = [];
   let filter: string | undefined;
+  let refresh = false;
   for (let index = 0; index < args.length; index++) {
-    if (args[index] !== '--filter') inputs.push(args[index]);
+    // Only an organisation's scan has a cache: for one repository the flag changes nothing.
+    if (args[index] === '--no-cache') refresh = true;
+    else if (args[index] !== '--filter') inputs.push(args[index]);
     // One argument, right after the flag: not missing, not blank, not the flag again; its words,
     // split on whitespace, as in the web view.
     else if (filter === undefined && args[index + 1]?.trim() && args[index + 1] !== '--filter') filter = filterWords(args[++index]).join(' ');
@@ -62,7 +69,7 @@ async function scanCommand(args: string[], context: Context) {
   if (inputs.length !== 1) throw new AtlasError(scanUsage);
   if (parseGitHubOwner(inputs[0])) {
     if (filter !== undefined) throw new AtlasError('--filter works on one repository, not on an organisation');
-    return printOrganisation(await scanWithProgress(inputs[0], context), context);
+    return printOrganisation(await scanWithProgress(inputs[0], refresh, context), context);
   }
   const result = await scan(await context.open(inputs[0]), { filter });
   printRepository(result.repository, result.skills, filter === undefined ? undefined : { filter, total: result.total }, context);
@@ -70,10 +77,10 @@ async function scanCommand(args: string[], context: Context) {
 }
 
 /** The organisation's scan, with a progress bar while it runs; hidden once it ends, whatever the outcome. */
-async function scanWithProgress(input: string, { scanOrganisation, progress }: Context): Promise<OrganisationResult> {
-  if (!progress) return scanOrganisation(input);
+async function scanWithProgress(input: string, refresh: boolean, { scanOrganisation, progress }: Context): Promise<OrganisationResult> {
+  if (!progress) return scanOrganisation(input, undefined, refresh);
   try {
-    return await scanOrganisation(input, (scanned, total) => progress.show(progressBar(scanned, total)));
+    return await scanOrganisation(input, (scanned, total) => progress.show(progressBar(scanned, total)), refresh);
   } finally {
     progress.hide();
   }

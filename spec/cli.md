@@ -6,7 +6,8 @@
 `./skill-atlas scan <GitHub URL | directory> --filter <words>`: only the skills whose **name** or
 **description** contains **every** word, *case-insensitive*, in *any order*; before or after the
 URL; one argument, split on *whitespace* (`--filter "kotlin test"`), as in the web view
-Prints the result **at once**; *nothing is stored*.
+`./skill-atlas scan github.com/<org> --no-cache`: every repository scanned again, see *Cache*
+Prints the result **at once**; *nothing is stored*, but an organisation's *cache*.
 `GITHUB_TOKEN`, optional: a higher GitHub rate limit.
 ## Output
 ```
@@ -42,6 +43,16 @@ intellij-community — 41 skills
 - Warnings go to *stderr*, `warning: <repo>: …`; exit code 0
 - With `--filter` → `--filter works on one repository, not on an organisation`, exit code 1
 - Unknown organisation → its message, exit code 1
+## Cache
+An organisation's scan keeps each repository's count in a local SQLite file, as `spec/analysis.md`
+says; a repository that has not changed is not fetched again
+- The output is *the same* with a cold or a warm cache: stdout, stderr, the progress bar, the exit code
+- `--no-cache`, before or after the URL: every repository scanned again, the entries replaced
+  - With one repository or a directory: accepted, changes nothing; nothing is stored there
+- `SKILL_ATLAS_CACHE=<file>`: the database; by default `skill-atlas/cache.db` in `XDG_CACHE_HOME`,
+  else in `~/.cache`; never in the repository or the current directory
+- A cache that is missing, not a database, or cannot be used → the scan as without it, exit code 0;
+  at most `warning: cache: …` on *stderr*
 ## End-to-end tests
 `./skill-atlas scan github.com/JetBrains/<repo>/tree/<commit>` on real repositories,
 JetBrains/MPS, JetBrains/android and JetBrains/koog, each at a fixed commit:
@@ -50,4 +61,4 @@ JetBrains/MPS, JetBrains/android and JetBrains/koog, each at a fixed commit:
 
 `./skill-atlas scan github.com/vietage`, a real organisation, on its default branches: the header,
 one line per repository, counts that add up, the order, its fork skipped; an unknown organisation
-→ exit code 1
+→ exit code 1; a second scan, with a warm cache → the same output

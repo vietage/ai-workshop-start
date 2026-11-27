@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // The Node client: a GitHub repository through the GitHub API, or a local directory; stdout and
-// stderr, or the local web view. Nothing is stored.
+// stderr, or the local web view. Only an organisation's scan stores anything: its cache.
+import { openCache } from './cache.ts';
 import { run } from './commands.ts';
 import { openGitHub, parseGitHubUrl } from './core/github.ts';
 import { scanOrganisation as scanOwner, type Progress } from './core/organisation.ts';
@@ -9,7 +10,9 @@ import { serve } from './web.ts';
 
 const token = process.env.GITHUB_TOKEN || undefined;
 const open = (input: string) => (parseGitHubUrl(input) ? openGitHub(input, { fetch, token }) : openDirectory(input));
-const scanOrganisation = (input: string, progress?: Progress) => scanOwner(input, { fetch, token, progress });
+// The repositories already scanned are kept in a SQLite file, for the CLI and the web view alike.
+const scanOrganisation = (input: string, progress?: Progress, refresh?: boolean) =>
+  scanOwner(input, { fetch, token, progress, refresh, cache: () => openCache() });
 // A progress bar only on a terminal: redrawn on one line, erased when done; piped stderr gets nothing.
 let drawn = false;
 const progress = process.stderr.isTTY

@@ -1,7 +1,8 @@
 # Web view
 `./skill-atlas serve [--port <port>]`: a local web page, at `http://localhost:4173` by default
 - Listens on *localhost only*; a request for another host name is refused (DNS rebinding)
-- The same scan as the CLI: a GitHub URL or a local directory; *nothing is stored*
+- The same scan as the CLI: a GitHub URL or a local directory; *nothing is stored*, but an
+  organisation's *cache*, the same file as the CLI's (`spec/analysis.md`, *Cache*)
 - Stops with Ctrl+C
 ## The page
 - A field for the **repository link**, and a *Scan* button
@@ -41,6 +42,10 @@ and `content`, the SKILL.md text), `total` (the count before the filter), `warni
 - An organisation → JSON: `organisation` (`name`, `url`), `repositories` (each with `name`, `url`,
   `commit`, `skillCount`; `null` for one that failed), `skills` (their sum), `warnings`
   - With `filter` → status 400; unknown organisation → status 400
+  - The same JSON, and the same `stream=1` lines, with a cold or a warm *cache*; a repository
+    scanned by the CLI is not fetched again, and the other way round
+  - `cache=0`: every repository scanned again, as `--no-cache`; the page does not send it
+  - A cache that cannot be used → status 200, at most one of the `warnings`, `cache: …`
 - `stream=1`: `application/x-ndjson`, one JSON object a line: `{ "progress": { "scanned", "total" } }`
   as an organisation's repositories are done (0 of N first), then `{ "result": <the JSON above> }`;
   one repository: only the `result`

@@ -26,6 +26,14 @@ export type ScanResult = {
   warnings: string[];
 };
 
+/**
+ * The version of the analysis rules: what is a skill, how many a repository has, and every warning
+ * (`find.ts`, `parse.ts`, the copies below, a tree too large in `github.ts`). An organisation's
+ * cache keeps counts and warnings, and uses only the ones this version gave: raise it with any
+ * change that gives another count or another warning for the same files at the same commit.
+ */
+export const RULES_VERSION = 1;
+
 /** fetch → find → parse, then the filter. Nothing is stored: the result is all there is. */
 export async function scan(source: Source, options: ScanOptions = {}): Promise<ScanResult> {
   const files = findSkills(source.paths);
