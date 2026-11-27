@@ -150,6 +150,7 @@ function setUrl(repo, skill) {
 /**
  * A list from the keyboard: one item in the Tab order, the selected one, else the first; the arrow
  * keys, Home and End move the focus through it; Enter or Space selects the item focused, as a click.
+ * When the focus leaves the list, its Tab stop goes back to the selected item.
  */
 function rove(list, item) {
   const items = [...list.children];
@@ -173,6 +174,9 @@ for (const list of [$('skills'), $('repositories')]) {
       event.preventDefault();
       event.target.click();
     }
+  });
+  list.addEventListener('focusout', (event) => {
+    if (!list.contains(event.relatedTarget)) rove(list);
   });
 }
 

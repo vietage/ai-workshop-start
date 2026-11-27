@@ -1207,6 +1207,12 @@ test('page: the skills from the keyboard: Tab reaches the selected one, the arro
     press(view, 'ArrowDown');
     assert.equal(view.selected(), paths[0]);
     assert.equal(view.$('skill').querySelector('h2')!.textContent, 'code-style');
+    // The focus leaving the list (Shift+Tab, a click elsewhere): Tab comes back on the selected one.
+    view.$('filter').focus();
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'filter', paths[0], 'a']);
+    press(view, 'ArrowDown');
+    press(view, 'ArrowDown');
+    assert.equal(focused(view), paths[1]);
 
     // Enter selects the skill focused: its SKILL.md, its link, the URL.
     assert.equal(press(view, 'Enter'), true);
@@ -1246,6 +1252,11 @@ test('page: an organisation\'s repositories from the keyboard: Tab reaches them,
     assert.equal(focused(view), 'Beta');
     // Moving the focus opens nothing.
     assert.equal(view.$('main').hidden, true);
+    // The focus leaving the list: Tab comes back on the first, none being selected.
+    view.$('scan').focus();
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'alpha']);
+    repositories()[0].focus();
+    press(view, 'ArrowDown');
     let scans = view.scans();
     assert.equal(press(view, 'Enter'), true);
     await view.settled(scans + 1);
