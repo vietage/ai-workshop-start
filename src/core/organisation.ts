@@ -141,6 +141,14 @@ export function sortRepositories(repositories: OrganisationRepository[]): Organi
   );
 }
 
+/**
+ * The repositories an organisation's list shows: every one but those scanned with no skills; the
+ * ones that failed (`not scanned`) stay. The page applies the same rule (src/web-page.ts).
+ */
+export function listedRepositories(repositories: OrganisationRepository[]): OrganisationRepository[] {
+  return repositories.filter((repository) => repository.skillCount !== 0);
+}
+
 /** `work` for every item, at most `limit` at the same time; the results in the items' order. */
 async function pool<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);

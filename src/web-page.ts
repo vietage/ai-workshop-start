@@ -61,6 +61,14 @@ export const PAGE = `<!doctype html>
   #warnings { margin: 0; padding: 12px 16px 12px 32px; font-size: 13px; color: var(--warning); border-top: 1px solid var(--border); }
   #warnings:empty { display: none; }
   #organisation { margin: 16px 24px 0; padding: 14px 16px; }
+  /* An organisation's tabs: its own, then the repository's, with a close button. */
+  #tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 24px 0; }
+  #tabs [role="tab"] { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); box-shadow: var(--shadow); cursor: pointer; }
+  #tabs [role="tab"]:hover { background: #8b5cf60f; }
+  #tabs [role="tab"][aria-selected="true"] { background: var(--selected); box-shadow: inset 0 -3px var(--accent); font-weight: 600; }
+  #tabs .close { padding: 0 6px; border-radius: 999px; font-size: 14px; line-height: 1.4; background: transparent; color: var(--muted); box-shadow: none; }
+  #tabs .close:hover { background: #8b5cf626; color: var(--text); }
+  #loading { margin: 16px 24px; }
   #org-summary { color: var(--muted); margin-bottom: 10px; }
   #org-summary strong { color: var(--text); }
   /* The repositories in a column, one a line: its name, and its count right next to it. */
@@ -71,7 +79,7 @@ export const PAGE = `<!doctype html>
   #repositories .count { padding: 0 8px; border-radius: 999px; font-size: 12px; color: var(--muted); background: #8b5cf61a; white-space: nowrap; }
   #org-warnings { margin: 8px 0 0; padding-left: 16px; font-size: 13px; color: var(--warning); }
   #org-warnings:empty { display: none; }
-  #error { margin: 16px 24px; padding: 10px 14px; border-radius: 10px; background: #e11d4822; color: #e11d48; white-space: pre-wrap; }
+  #error { margin: 16px 24px; padding: 10px 14px; border-radius: 10px; background: #e11d4822; color: #e11d48; white-space: pre-wrap; overflow-wrap: anywhere; }
   #error:empty { display: none; }
   #skill { padding: 18px 24px; overflow: auto; min-width: 0; }
   #skill h2 { margin: 0 0 4px; font-size: 18px; background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
@@ -92,11 +100,13 @@ export const PAGE = `<!doctype html>
     <span id="progress-text"></span>
   </div>
 </header>
+<nav id="tabs" role="tablist" aria-label="Organisation and its repositories" hidden></nav>
 <section id="organisation" hidden>
   <div id="org-summary"></div>
   <ul id="repositories" role="listbox" aria-label="Repositories"></ul>
   <ul id="org-warnings"></ul>
 </section>
+<p id="loading" class="placeholder" hidden></p>
 <div id="error" role="alert"></div>
 <main id="main" hidden>
   <section id="list">
@@ -120,15 +130,24 @@ const element = (tag, className, text) => {
 let result;
 let scanned;
 let selected;
-// The organisation shown, when the link is one, and the name of its selected repository.
+// The organisation shown, when the link is one, and the name of the repository in the active tab.
 let organisation;
 let repository;
+// The organisation's repositories opened, by name, each \`{ name, result, error, selected, filter }\`:
+// kept until another link is entered. The one in the repository's tab, undefined when it is
+// closed; the same when that tab is the active one, undefined for the organisation's own tab.
+let opened = new Map();
+let tab;
+let active;
 // The latest scan of a link entered: only its progress is shown.
 let scanning;
 // The latest scan started, a link entered or a repository opened: the Scan button waits for it
 // only, not for an earlier one it replaced, which may never finish.
 let latest;
 const plural = (count, one, many) => count + ' ' + (count === 1 ? one : many);
+// The same rule as listedRepositories in src/core/organisation.ts: every repository but those
+// scanned with no skills; the ones not scanned stay.
+const listed = () => organisation.repositories.filter((entry) => entry.skillCount !== 0);
 
 // The same rule as filterSkills in src/core/model.ts: the name or the description contains every
 // word, each in any case, in any order.
@@ -142,7 +161,8 @@ function setUrl(repo, skill) {
   if (repo) params.set('repo', repo);
   if (organisation && repository) params.set('repository', repository);
   if (skill) params.set('skill', skill);
-  if (filterWords()) params.set('filter', filterWords());
+  // The organisation's own tab has no filter.
+  if (filterWords() && !(organisation && !active)) params.set('filter', filterWords());
   const query = params.toString();
   history.replaceState(null, '', query ? '?' + query : location.pathname);
 }
@@ -180,12 +200,18 @@ for (const list of [$('skills'), $('repositories')]) {
   });
 }
 
+/** A failed answer's message: its \`error\`, or its status when it is not the API's JSON. */
+async function failure(response) {
+  const body = await response.json().catch(() => undefined);
+  if (typeof body?.error === 'string') return new Error(body.error);
+  return new Error('The server answered ' + response.status + (response.statusText ? ' ' + response.statusText : ''));
+}
+
 /** The scan of a link: the API's answer, or its message as an error. */
 async function request(link) {
   const response = await fetch('/api/scan?repo=' + encodeURIComponent(link));
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error);
-  return body;
+  if (!response.ok) throw await failure(response);
+  return response.json();
 }
 
 /**
@@ -194,7 +220,7 @@ async function request(link) {
  */
 async function requestWithProgress(link, progress) {
   const response = await fetch('/api/scan?stream=1&repo=' + encodeURIComponent(link));
-  if (!response.ok) throw new Error((await response.json()).error);
+  if (!response.ok) throw await failure(response);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffered = '';
@@ -238,8 +264,11 @@ async function busy(work) {
   }
 }
 
-/** A link entered: a repository, or an organisation and, if \`name\` is one of them, that repository. */
-function scan(repo, skill, name) {
+/**
+ * A link entered: a repository, or an organisation and, if \`name\` is one of them, that repository
+ * in its tab, with \`filter\`.
+ */
+function scan(repo, skill, name, filter) {
   // This scan, to tell it from a later one of the same link.
   const current = {};
   return busy(async () => {
@@ -248,6 +277,11 @@ function scan(repo, skill, name) {
     scanning = current;
     organisation = undefined;
     repository = undefined;
+    opened = new Map();
+    tab = undefined;
+    active = undefined;
+    $('tabs').hidden = true;
+    $('loading').hidden = true;
     showProgress();
     try {
       // The whole repository: the filter narrows it here, as you type, without scanning again.
@@ -259,10 +293,8 @@ function scan(repo, skill, name) {
         organisation = body;
         result = undefined;
         showOrganisation();
-        if (organisation.repositories.some((entry) => entry.name === name)) return await openRepository(name, skill);
-        $('main').hidden = true;
-        setUrl(repo);
-        return;
+        if (listed().some((entry) => entry.name === name)) return await openRepository(name, skill, filter);
+        return activate(undefined);
       }
       $('organisation').hidden = true;
       result = body;
@@ -275,16 +307,19 @@ function scan(repo, skill, name) {
   });
 }
 
-/** A failed scan: its message, nothing else; the organisation stays when one of its repositories failed. */
+/** A failed scan: its message, nothing else; in a repository's tab, the organisation's tab stays. */
 function failed(error) {
   result = undefined;
   setUrl(scanned);
-  $('organisation').hidden = !organisation;
+  $('organisation').hidden = !organisation || active !== undefined;
   $('main').hidden = true;
   $('error').textContent = error.message;
 }
 
-/** The organisation: its repositories, each with its skill count, and its warnings. */
+/**
+ * The organisation: all its repositories counted; each one with its skill count, the ones with no
+ * skills left out; and its warnings.
+ */
 function showOrganisation() {
   const shown = organisation;
   const { organisation: owner, repositories, skills, warnings } = shown;
@@ -293,7 +328,7 @@ function showOrganisation() {
     element('strong', '', owner.name),
     ' · ' + plural(repositories.length, 'repository', 'repositories') + ' · ' + plural(skills, 'skill', 'skills'),
   );
-  $('repositories').replaceChildren(...repositories.map((entry) => {
+  $('repositories').replaceChildren(...listed().map((entry) => {
     const item = element('li');
     item.setAttribute('role', 'option');
     item.setAttribute('aria-selected', 'false');
@@ -308,27 +343,93 @@ function showOrganisation() {
   $('org-warnings').replaceChildren(...warnings.map((warning) => element('li', '', warning)));
 }
 
-/** One repository of the organisation: its skills, as for a repository link, at the commit counted. */
-async function openRepository(name, skill) {
+/**
+ * One repository of the organisation, in the repository's tab, made active: its skills, as for a
+ * repository link, at the commit counted. Opened before → as it was left, not scanned again; one
+ * that failed is scanned again.
+ */
+async function openRepository(name, skill, filter = '') {
+  const known = opened.get(name);
+  if (known && !known.error) {
+    tab = known;
+    return activate(known);
+  }
   const entry = organisation.repositories.find((candidate) => candidate.name === name);
-  repository = name;
-  for (const item of $('repositories').children) item.setAttribute('aria-selected', String(item.dataset.name === name));
-  rove($('repositories'));
-  $('error').textContent = '';
-  // Empty, without a commit: nothing to scan, and no skills, as its count says.
-  if (!entry.commit && entry.skillCount === 0) {
-    result = { repository: { id: entry.url.replace('https://github.com/', '') }, skills: [], total: 0, warnings: [] };
-    return show(skill);
-  }
-  const current = organisation;
+  const state = { name, selected: skill, filter };
+  opened.set(name, state);
+  tab = state;
+  activate(state);
   try {
-    const body = await request(entry.commit ? entry.url + '/tree/' + entry.commit : entry.url);
-    if (organisation !== current || repository !== name) return;
-    result = body;
-    show(skill);
+    state.result = await request(entry.commit ? entry.url + '/tree/' + entry.commit : entry.url);
   } catch (error) {
-    if (organisation === current && repository === name) failed(error);
+    state.error = error;
   }
+  // Another tab, repository or link since: kept, if it is still the same link, but not shown.
+  if (active === state) activate(state);
+}
+
+/** Shows a tab: the organisation's (\`undefined\`), its repositories; or the repository's, its skills. */
+function activate(state) {
+  active = state;
+  repository = state?.name;
+  showTabs();
+  $('error').textContent = '';
+  $('organisation').hidden = state !== undefined;
+  $('loading').hidden = true;
+  if (!state) {
+    result = undefined;
+    $('main').hidden = true;
+    return setUrl(scanned);
+  }
+  $('filter').value = state.filter;
+  if (state.error) return failed(state.error);
+  if (!state.result) {
+    // Still scanning: its name, and nothing else until it is done.
+    result = undefined;
+    $('main').hidden = true;
+    $('loading').hidden = false;
+    $('loading').textContent = 'Scanning ' + state.name + '…';
+    return setUrl(scanned);
+  }
+  result = state.result;
+  show(state.selected);
+}
+
+/** Closes the repository's tab: the organisation's, active. */
+function closeTab() {
+  tab = undefined;
+  activate(undefined);
+}
+
+/** The tabs: the organisation's, then the repository's, if open; that repository marked in the list. */
+function showTabs() {
+  const node = (state, label) => {
+    const item = element('div', 'tab');
+    item.setAttribute('role', 'tab');
+    item.setAttribute('aria-selected', String(active === state));
+    item.append(element('span', 'label', label));
+    item.addEventListener('click', () => activate(state));
+    return item;
+  };
+  const tabs = [node(undefined, organisation.organisation.name)];
+  if (tab) {
+    const item = node(tab, tab.name);
+    item.dataset.name = tab.name;
+    const close = element('button', 'close', '×');
+    close.type = 'button';
+    close.title = 'Close ' + tab.name;
+    close.setAttribute('aria-label', 'Close ' + tab.name);
+    close.addEventListener('click', (event) => {
+      event.stopPropagation();
+      closeTab();
+    });
+    item.append(close);
+    tabs.push(item);
+  }
+  $('tabs').hidden = false;
+  $('tabs').replaceChildren(...tabs);
+  for (const item of $('repositories').children) item.setAttribute('aria-selected', String(item.dataset.name === tab?.name));
+  rove($('repositories'));
 }
 
 /** The repository, and its skills that match the filter; the skill at \`path\` selected if shown. */
@@ -363,6 +464,7 @@ function show(path) {
 function select(path) {
   const skill = result.skills.find((skill) => skill.path === path);
   selected = skill?.path;
+  if (active) active.selected = selected;
   for (const item of $('skills').children) item.setAttribute('aria-selected', String(item.dataset.path === path));
   rove($('skills'));
   setUrl(scanned, selected);
@@ -380,6 +482,7 @@ function select(path) {
 }
 
 $('filter').addEventListener('input', () => {
+  if (active) active.filter = $('filter').value;
   // After a failed scan there is nothing to narrow, but the URL still keeps the word.
   if (result) show(selected);
   else setUrl(scanned);
@@ -402,7 +505,7 @@ const params = new URLSearchParams(location.search);
 $('filter').value = params.get('filter') ?? '';
 if (params.get('repo')) {
   $('repo').value = params.get('repo');
-  scan(params.get('repo'), params.get('skill'), params.get('repository'));
+  scan(params.get('repo'), params.get('skill'), params.get('repository'), params.get('filter') ?? '');
 }
 </script>
 </body>

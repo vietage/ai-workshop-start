@@ -32,12 +32,13 @@ JetBrains · 549 repositories · 144 skills
 MPS — 43 skills
 intellij-community — 41 skills
 …
-100-exercises-to-learn-rust — 0 skills
-…
 <repo> — not scanned
 ```
 - `<org> · N repositories · M skills`, as GitHub spells the name; then `<repo> — N skills`, in the
   order of `spec/analysis.md`; one that failed: `<repo> — not scanned`
+- Repositories scanned with **0 skills** (an empty one too) → *not listed*; `not scanned` ones stay;
+  the header's `N repositories` still counts *all* of them; their warnings stay
+  - Every one with 0 skills → only the header, `<org> · N repositories · 0 skills`; exit code 0
 - While it scans, a **progress bar** on *stderr*, when it is a *terminal*:
   `[########------------] 12/30 repositories`, 20 characters filled in proportion; redrawn on one
   line as each repository is done; *erased* when the scan ends, before the result, also on an error
@@ -65,5 +66,6 @@ JetBrains/MPS, JetBrains/android and JetBrains/koog, each at a fixed commit:
 - `UPDATE_EXPECTED=1 npm test` stores the output again
 
 `./skill-atlas scan github.com/vietage`, a real organisation, on its default branches: the header,
-one line per repository, counts that add up, the order, its fork skipped; an unknown organisation
+one line per repository listed, none with 0 skills, counts that add up, the order, its fork
+skipped; an unknown organisation
 → exit code 1; a second scan, with a warm cache → the same output

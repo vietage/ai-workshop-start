@@ -21,8 +21,10 @@ In a terminal, the names are bold and the links dim; piped, or with `NO_COLOR` s
 plain text, the same words.
 
 An organisation, or a user: `./skill-atlas scan github.com/JetBrains` lists its repositories, each
-with its skill count, the most first; archived repositories and forks are skipped. While it scans, a
-progress bar shows how many repositories are done, in the terminal and in the web view.
+with its skill count, the most first; archived repositories and forks are skipped. Repositories with
+no skills are left out of the list, but counted in its header; the ones that could not be scanned
+stay. While it scans, a progress bar shows how many repositories are done, in the terminal and in
+the web view.
 
 An organisation's scan remembers each repository's skill count, warnings and commit in a local SQLite
 cache, `~/.cache/skill-atlas/cache.db` (or in `XDG_CACHE_HOME`; `SKILL_ATLAS_CACHE=<file>` for another
@@ -33,7 +35,8 @@ the cache, and a missing or broken one never fails a scan. One repository's scan
 
 Or in a browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
 for the repository or organisation link (an organisation's repositories in a column, each with its
-skill count), its skills (with a field to filter them) and each one's SKILL.md, in a gradient style,
+skill count; a repository selected opens its skills in a tab of its own in the page, next to the
+organisation's tab), its skills (with a field to filter them) and each one's SKILL.md, in a gradient style,
 light or dark as the system's colours (`--port <port>` for another port).
 
 Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests. `npm run qa` tests the
