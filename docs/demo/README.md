@@ -22,6 +22,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [long-link.mp4](long-link.mp4) | [long-link.json](long-link.json) | a link over 16 KB: its scan's message, on reload too, and the API's 400 JSON, [#46](https://github.com/vietage/ai-workshop-start/issues/46) |
 | [warnings-area.mp4](warnings-area.mp4) | [warnings-area.json](warnings-area.json) | a scan's warnings in their own area of limited height, with a scrollbar, [#36](https://github.com/vietage/ai-workshop-start/issues/36) |
 | [keyboard-lists.mp4](keyboard-lists.mp4) | [keyboard-lists.json](keyboard-lists.json) | the skills and an organisation's repositories from the keyboard, [#47](https://github.com/vietage/ai-workshop-start/issues/47) |
+| [miami-neon-style.mp4](miami-neon-style.mp4) | [miami-neon-style.json](miami-neon-style.json) | the Miami neon-sunset look: the sunset, the palms, glass cards, neon controls, [#59](https://github.com/vietage/ai-workshop-start/issues/59) |
 
 ## word-filter
 
@@ -167,3 +168,16 @@ The web view on `./fixture`, then `github.com/Kotlin`, without the mouse:
 | Enter; ArrowDown, Space | the skill focused selected, its SKILL.md |
 | `commit` in the filter, ArrowDown | the focus on to the skills |
 | Tab, Tab, ArrowDown ×2, Enter | an organisation's repository opened, its skills |
+
+## miami-neon-style
+
+The web view on `./fixture`, then `github.com/Kotlin`, then a directory that does not exist:
+
+| Step | Shows |
+| --- | --- |
+| The empty page | the sunset gradient, the sun on the horizon, the ocean, two palms, the title in neon |
+| `./fixture` scanned | the scan form, the warnings, the skills and the SKILL.md on glass cards |
+| A skill selected | its neon tint and accent bar |
+| `github.com/Kotlin` scanning | *Scan* disabled: no gradient, no glow, a dashed border |
+| A repository opened | the tabs, and the same cards in the repository's tab |
+| `./no-such-directory` | the failed scan's message in its own box |
