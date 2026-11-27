@@ -14,6 +14,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [scan-progress.mp4](scan-progress.mp4) | [scan-progress.json](scan-progress.json) | the progress bar of an organisation's scan, [#18](https://github.com/vietage/ai-workshop-start/issues/18) |
 | [failed-scan.mp4](failed-scan.mp4) | [failed-scan.json](failed-scan.json) | a failed scan shows its message and nothing else, [#20](https://github.com/vietage/ai-workshop-start/issues/20) |
 | [organisation-cache.mp4](organisation-cache.mp4) | [organisation-cache.json](organisation-cache.json) | the cache of an organisation's scan, [#22](https://github.com/vietage/ai-workshop-start/issues/22) |
+| [nicer-skill-list.mp4](nicer-skill-list.mp4) | [nicer-skill-list.json](nicer-skill-list.json) | the gradient style, an organisation's repositories in a column, [#30](https://github.com/vietage/ai-workshop-start/issues/30) |
 
 ## word-filter
 
@@ -69,3 +70,17 @@ SKILL_ATLAS_CACHE=/tmp/skill-atlas-demo/cache.db TIMEFORMAT='%R s' \
 | `--no-cache` | the same output, 10.8 s | every repository scanned again, the entries replaced |
 | the file overwritten with `garbage` | the same output, `cache.db.corrupt`, `warning: cache: …` | a broken cache never fails a scan |
 | the web view, `github.com/Kotlin` | the same repositories and counts | one cache for the CLI and the web view |
+
+## nicer-skill-list
+
+The web view on `./fixture`, then the `Kotlin` organisation, on its default branches:
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `./fixture`, Scan | the gradient header, the page, the cards | the gradient style ([spec/web.md](../../spec/web.md), *Style*) |
+| `invoices` selected | a gradient tint and an accent bar, its name in the gradient | the selected skill |
+| `github.com/Kotlin`, Scan | the repositories one a line, each count in a pill next to its name | in a column, not in a row |
+| `kotlinx-rpc` selected | the same accent on the repository; its skills below | a repository selected |
+
+The CLI's bold names and dim links are drawn only when stdout is a terminal
+([spec/cli.md](../../spec/cli.md)), which the recorder's terminal is not: it shows the plain text.

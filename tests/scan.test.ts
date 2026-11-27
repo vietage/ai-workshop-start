@@ -666,3 +666,60 @@ test('./skill-atlas scan github.com/<org>: on a terminal, the bar redrawn on one
   // Once erased, the warnings as without a terminal.
   assert.equal(terminal.stderr.slice(terminal.stderr.lastIndexOf(erase) + erase.length), piped.stderr);
 });
+
+/** The real CLI, GitHub answered from the recordings; `STDOUT_TERMINAL=1`: stdout is a terminal. */
+function cliOnTerminal(args: string[], env: Record<string, string>, cache: string) {
+  const { NO_COLOR, ...rest } = process.env;
+  return spawnSync(process.execPath, ['--import', TERMINAL, CLI, ...args], {
+    encoding: 'utf8',
+    env: { ...rest, TERMINAL: '', SKILL_ATLAS_CACHE: join(cache, 'cache.db'), ...env },
+  });
+}
+
+const bold = (text: string) => `\x1b[1m${text}\x1b[22m`;
+const dim = (text: string) => `\x1b[2m${text}\x1b[22m`;
+const unstyled = (text: string) => text.replace(/\x1b\[\d+m/g, '');
+
+test('./skill-atlas scan on a terminal: the names bold, the links and also in dim; the same text as piped', (t) => {
+  const cache = mkdtempSync(join(tmpdir(), 'skill-atlas-'));
+  t.after(() => rmSync(cache, { recursive: true, force: true }));
+  const piped = cliOnTerminal(['scan', FIXTURE], { STDOUT_TERMINAL: '' }, cache);
+  assert.equal(piped.status, 0, piped.stderr);
+  assert.ok(!piped.stdout.includes('\x1b'), JSON.stringify(piped.stdout));
+  const terminal = cliOnTerminal(['scan', FIXTURE], { STDOUT_TERMINAL: '1' }, cache);
+  assert.equal(terminal.status, 0, terminal.stderr);
+  assert.equal(unstyled(terminal.stdout), piped.stdout);
+  assert.equal(terminal.stderr, piped.stderr);
+  const lines = terminal.stdout.split('\n');
+  assert.equal(lines[0], `${bold('fixture')} · 4 skills`);
+  assert.equal(lines[1], `${bold('code-style')} — Follow the project's code style.`);
+  assert.equal(lines[2], `  ${dim(`${pathToFileURL(FIXTURE).href}/.claude/skills/code-style/SKILL.md`)}`);
+  assert.equal(lines[3], `  ${dim('also in .github/skills/code-style/SKILL.md')}`);
+  // No description: the name alone, bold.
+  assert.ok(lines.includes(bold('release-checklist')), JSON.stringify(lines));
+  // With --filter: the same styling, the header and the message as plain.
+  const filtered = cliOnTerminal(['scan', FIXTURE, '--filter', 'zzz'], { STDOUT_TERMINAL: '1' }, cache);
+  assert.equal(filtered.stdout, `${bold('fixture')} · 0 of 4 skills\nno skills match "zzz"\n`);
+});
+
+test('./skill-atlas scan on a terminal with NO_COLOR → plain text', (t) => {
+  const cache = mkdtempSync(join(tmpdir(), 'skill-atlas-'));
+  t.after(() => rmSync(cache, { recursive: true, force: true }));
+  const plain = cliOnTerminal(['scan', FIXTURE], { STDOUT_TERMINAL: '1', NO_COLOR: '1' }, cache);
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.equal(plain.stdout, `${fixture.stdout}\n`);
+});
+
+test('./skill-atlas scan github.com/<org> on a terminal: the organisation and its repositories bold, not scanned dim', (t) => {
+  const cache = mkdtempSync(join(tmpdir(), 'skill-atlas-'));
+  t.after(() => rmSync(cache, { recursive: true, force: true }));
+  const piped = cliOnTerminal(['scan', 'github.com/skillatlas', '--no-cache'], { STDOUT_TERMINAL: '' }, cache);
+  assert.equal(piped.status, 0, piped.stderr);
+  const terminal = cliOnTerminal(['scan', 'github.com/skillatlas', '--no-cache'], { STDOUT_TERMINAL: '1' }, cache);
+  assert.equal(terminal.status, 0, terminal.stderr);
+  assert.equal(unstyled(terminal.stdout), piped.stdout);
+  const lines = terminal.stdout.trimEnd().split('\n');
+  assert.equal(lines[0], `${bold('SkillAtlas')} · 7 repositories · 6 skills`);
+  assert.equal(lines[1], `${bold('alpha')} — 2 skills`);
+  assert.equal(lines.at(-1), `${bold('broken')} — ${dim('not scanned')}`);
+});

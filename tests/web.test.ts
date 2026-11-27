@@ -656,6 +656,41 @@ test('page: an organisation link → its repositories with their counts; selecti
   }
 });
 
+test('page: an organisation\'s repositories in a column, one a line, the count next to each name', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    assert.equal(style(view.$('repositories')).display, 'flex');
+    assert.equal(style(view.$('repositories')).flexDirection, 'column');
+    for (const item of view.$('repositories').children) {
+      // The name, then its count right after it, on the same line.
+      assert.deepEqual([...item.children].map((child) => child.className), ['name', 'count']);
+      assert.equal(style(item).display, 'flex');
+      assert.notEqual(style(item).flexDirection, 'column');
+    }
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a gradient style: the header, the page, cards, the selected skill and its name', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    const document = view.dom.window.document;
+    assert.match(style(document.querySelector('header')!).backgroundImage, /^linear-gradient\(/);
+    assert.match(style(document.body).backgroundImage, /^linear-gradient\(/);
+    for (const id of ['organisation', 'list', 'skill']) assert.notEqual(style(view.$(id)).borderRadius, '', id);
+    const selected = view.items().find((item) => item.getAttribute('aria-selected') === 'true')!;
+    assert.match(style(selected).backgroundImage, /^linear-gradient\(/);
+    assert.match(style(view.$('skill').querySelector('h2')!).backgroundImage, /^linear-gradient\(/);
+  } finally {
+    view.close();
+  }
+});
+
 test('page: the URL keeps the organisation and the repository; reload shows the same', { timeout: 5_000 }, async () => {
   const view = await page(`/?repo=${encodeURIComponent('github.com/skillatlas')}&repository=alpha&skill=${encodeURIComponent('web/.github/skills/two/SKILL.md')}`);
   try {

@@ -1,0 +1,19 @@
+{
+  "serve": true,
+  "steps": [
+    { "goto": "/", "pause": 1200 },
+    { "caption": "A modern gradient style: the header, the page, cards" },
+    { "type": "#repo", "text": "./fixture", "pause": 300 },
+    { "click": "#scan" },
+    { "waitFor": "#skills li", "pause": 2500 },
+    { "caption": "The selected skill: a gradient tint, an accent bar, its name in the gradient" },
+    { "click": "#skills li:nth-child(3)", "pause": 2500 },
+    { "caption": "An organisation: its repositories in a column, the count next to each name" },
+    { "fill": "#repo", "text": "github.com/Kotlin" },
+    { "click": "#scan" },
+    { "waitFor": "#repositories li", "timeout": 180000, "pause": 3000 },
+    { "caption": "A repository selected: the same accent; its skills below" },
+    { "click": "#repositories li", "pause": 3500 },
+    { "caption": "" , "pause": 500 }
+  ]
+}

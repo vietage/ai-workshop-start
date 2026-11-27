@@ -22,9 +22,24 @@ export type Context = {
    * `hide` once the scan ends, also on an error. Missing where it is not shown (stderr not a terminal).
    */
   progress?: { show(line: string): void; hide(): void };
+  /**
+   * Bold and dim text in what is printed: missing where stdout is not a terminal (piped, a file,
+   * the browser terminal) or with NO_COLOR, so the text is then the same, without styling.
+   */
+  style?: Style;
   /** Starts the local web view; resolves once it listens. Missing where there is none (the browser). */
   serve?(port: number): Promise<void>;
 };
+
+export type Style = { strong(text: string): string; dim(text: string): string };
+
+/** ANSI bold and dim, each reset on its own: a terminal's styling. */
+export const ansi: Style = {
+  strong: (text) => `\x1b[1m${text}\x1b[22m`,
+  dim: (text) => `\x1b[2m${text}\x1b[22m`,
+};
+
+const plain: Style = { strong: (text) => text, dim: (text) => text };
 
 const usage = `Usage: skill-atlas <command>
 
@@ -103,22 +118,23 @@ async function serveCommand(args: string[], context: Context) {
 
 /**
  * `<owner>/<repo> · N skills`, or `· N of M skills` when filtered, then each skill's name, first
- * sentence and link; `no skills match "<words>"` when the filter leaves none.
+ * sentence and link, the names bold and the links dim on a terminal; `no skills match "<words>"` when the filter leaves none.
  */
 function printRepository(
   repository: Repository,
   skills: Skill[],
   filtered: { filter: string; total: number } | undefined,
-  { print }: Context,
+  { print, style = plain }: Context,
 ) {
   const total = filtered?.total ?? skills.length;
   const shown = filtered ? `${skills.length} of ` : '';
-  print(`${repository.id} · ${shown}${total} ${total === 1 ? 'skill' : 'skills'}`);
+  print(`${style.strong(repository.id)} · ${shown}${total} ${total === 1 ? 'skill' : 'skills'}`);
   if (filtered && skills.length === 0) print(`no skills match "${filtered.filter}"`);
   for (const skill of skills) {
-    print(skill.description ? `${skill.name} — ${firstSentence(skill.description)}` : skill.name);
-    print(`  ${skillLink(repository, skill)}`);
-    if (skill.copies.length > 0) print(`  also in ${skill.copies.join(', ')}`);
+    const name = style.strong(skill.name);
+    print(skill.description ? `${name} — ${firstSentence(skill.description)}` : name);
+    print(`  ${style.dim(skillLink(repository, skill))}`);
+    if (skill.copies.length > 0) print(`  ${style.dim(`also in ${skill.copies.join(', ')}`)}`);
   }
 }
 
@@ -126,12 +142,12 @@ function printRepository(
  * `<organisation> · N repositories · M skills`, then each repository with its skill count;
  * `not scanned` for the ones that failed. Warnings go to stderr.
  */
-function printOrganisation(result: OrganisationResult, { print, error }: Context) {
+function printOrganisation(result: OrganisationResult, { print, error, style = plain }: Context) {
   const repositories = result.repositories.length;
-  print(`${result.organisation.name} · ${plural(repositories, 'repository', 'repositories')} · ${plural(result.skills, 'skill', 'skills')}`);
+  print(`${style.strong(result.organisation.name)} · ${plural(repositories, 'repository', 'repositories')} · ${plural(result.skills, 'skill', 'skills')}`);
   for (const repository of result.repositories) {
-    const count = repository.skillCount === undefined ? 'not scanned' : plural(repository.skillCount, 'skill', 'skills');
-    print(`${repository.name} — ${count}`);
+    const count = repository.skillCount === undefined ? style.dim('not scanned') : plural(repository.skillCount, 'skill', 'skills');
+    print(`${style.strong(repository.name)} — ${count}`);
   }
   for (const warning of result.warnings) error(`warning: ${warning}`);
 }

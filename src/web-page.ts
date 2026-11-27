@@ -7,51 +7,74 @@ export const PAGE = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Skill Atlas</title>
 <style>
-  :root { color-scheme: light dark; --border: #8884; --muted: #888; --accent: #4f7cff; }
+  /* A modern gradient style: a violet-to-pink header, cards on a soft gradient, gradient accents. */
+  :root {
+    color-scheme: light dark;
+    --gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+    --page: linear-gradient(160deg, #eef2ff 0%, #faf5ff 50%, #fdf2f8 100%);
+    --card: #ffffffd9; --text: #1e1b4b; --muted: #6b6b8a; --border: #6366f126;
+    --accent: #7c3aed; --selected: linear-gradient(90deg, #6366f11f, #ec48990f);
+    --shadow: 0 1px 2px #1e1b4b0f, 0 8px 24px #4c1d9514; --warning: #b45309;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: linear-gradient(160deg, #0f0c29 0%, #1e1b4b 55%, #3b0a33 100%);
+      --card: #1b1838d9; --text: #ede9fe; --muted: #a5a3c7; --border: #a78bfa2e;
+      --accent: #a78bfa; --selected: linear-gradient(90deg, #8b5cf633, #ec48991f);
+      --shadow: 0 1px 2px #0006, 0 8px 24px #0005; --warning: #fbbf24;
+    }
+  }
   * { box-sizing: border-box; }
   /* Hidden means not shown, whatever display a rule below gives the element. */
   [hidden] { display: none !important; }
-  body { margin: 0; font: 15px/1.45 system-ui, sans-serif; }
-  header { padding: 16px 24px; border-bottom: 1px solid var(--border); }
-  h1 { margin: 0 0 10px; font-size: 18px; }
+  body { margin: 0; min-height: 100vh; font: 15px/1.5 system-ui, sans-serif; color: var(--text); background: var(--page); background-attachment: fixed; }
+  header { padding: 20px 24px 22px; background: var(--gradient); color: white; box-shadow: 0 4px 20px #6d28d933; }
+  h1 { margin: 0 0 12px; font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
   form { display: flex; gap: 8px; }
-  input { flex: 1; padding: 8px 10px; font: inherit; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: inherit; }
-  button { padding: 8px 16px; font: inherit; border: 0; border-radius: 6px; background: var(--accent); color: white; cursor: pointer; }
-  button:disabled { opacity: .6; cursor: default; }
-  #progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: var(--muted); }
-  #progress-bar { flex: 1; max-width: 420px; height: 8px; accent-color: var(--accent); }
-  main { display: grid; grid-template-columns: minmax(260px, 380px) 1fr; min-height: calc(100vh - 100px); }
-  #list { border-right: 1px solid var(--border); overflow: auto; }
-  #summary { padding: 12px 16px; color: var(--muted); }
-  #summary strong { color: CanvasText; }
-  #filter { display: block; width: calc(100% - 32px); margin: 0 16px 12px; padding: 6px 10px; }
+  input { flex: 1; padding: 9px 12px; font: inherit; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: inherit; }
+  input:focus { outline: 2px solid #a78bfa; outline-offset: 1px; }
+  header input { border-color: #ffffff59; background: #ffffff26; color: white; }
+  header input::placeholder { color: #ffffffb3; }
+  header input:focus { outline-color: white; }
+  button { padding: 9px 20px; font: inherit; font-weight: 600; border: 0; border-radius: 10px; background: white; color: #6d28d9; cursor: pointer; box-shadow: 0 2px 8px #1e1b4b33; }
+  button:hover { background: #f5f3ff; }
+  button:disabled { opacity: .7; cursor: default; }
+  #progress { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 13px; color: #ffffffd9; }
+  #progress-bar { flex: 1; max-width: 420px; height: 8px; accent-color: white; }
+  main { display: grid; grid-template-columns: minmax(260px, 380px) 1fr; gap: 16px; padding: 16px 24px 24px; min-height: calc(100vh - 110px); }
+  #list, #skill, #organisation { background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+  #list { overflow: auto; align-self: start; }
+  #summary { padding: 14px 16px 10px; color: var(--muted); }
+  #summary strong { color: var(--text); }
+  #filter { display: block; width: calc(100% - 32px); margin: 0 16px 12px; padding: 7px 12px; }
   #no-match { margin: 0; padding: 10px 16px; border-top: 1px solid var(--border); color: var(--muted); }
   #no-match:empty { display: none; }
   #skills { list-style: none; margin: 0; padding: 0; }
   #skills li { padding: 10px 16px; border-top: 1px solid var(--border); cursor: pointer; }
-  #skills li:hover { background: #8881; }
-  #skills li[aria-selected="true"] { background: #4f7cff22; box-shadow: inset 3px 0 var(--accent); }
+  #skills li:hover { background: #8b5cf60f; }
+  #skills li[aria-selected="true"] { background: var(--selected); box-shadow: inset 3px 0 var(--accent); }
   .name { font-weight: 600; }
   .description { font-size: 13px; }
   .path, .copies { font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; word-break: break-all; }
-  #warnings { margin: 0; padding: 12px 16px 12px 32px; font-size: 13px; color: #c80; border-top: 1px solid var(--border); }
+  #warnings { margin: 0; padding: 12px 16px 12px 32px; font-size: 13px; color: var(--warning); border-top: 1px solid var(--border); }
   #warnings:empty { display: none; }
-  #organisation { padding: 12px 24px; border-bottom: 1px solid var(--border); }
-  #org-summary { color: var(--muted); margin-bottom: 8px; }
-  #org-summary strong { color: CanvasText; }
-  #repositories { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; max-height: 30vh; overflow: auto; }
-  #repositories li { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
-  #repositories li:hover { background: #8881; }
-  #repositories li[aria-selected="true"] { background: #4f7cff22; border-color: var(--accent); }
-  #repositories .count { margin-left: 6px; font-size: 12px; color: var(--muted); }
-  #org-warnings { margin: 8px 0 0; padding-left: 16px; font-size: 13px; color: #c80; }
+  #organisation { margin: 16px 24px 0; padding: 14px 16px; }
+  #org-summary { color: var(--muted); margin-bottom: 10px; }
+  #org-summary strong { color: var(--text); }
+  /* The repositories in a column, one a line: its name, and its count right next to it. */
+  #repositories { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-width: 560px; max-height: 30vh; overflow: auto; }
+  #repositories li { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+  #repositories li:hover { background: #8b5cf60f; }
+  #repositories li[aria-selected="true"] { background: var(--selected); box-shadow: inset 3px 0 var(--accent); }
+  #repositories .count { padding: 0 8px; border-radius: 999px; font-size: 12px; color: var(--muted); background: #8b5cf61a; white-space: nowrap; }
+  #org-warnings { margin: 8px 0 0; padding-left: 16px; font-size: 13px; color: var(--warning); }
   #org-warnings:empty { display: none; }
-  #error { margin: 16px; padding: 10px 14px; border-radius: 6px; background: #d3303022; color: #e55; white-space: pre-wrap; }
+  #error { margin: 16px 24px; padding: 10px 14px; border-radius: 10px; background: #e11d4822; color: #e11d48; white-space: pre-wrap; }
   #error:empty { display: none; }
-  #skill { padding: 16px 24px; overflow: auto; min-width: 0; }
-  #skill h2 { margin: 0 0 4px; font-size: 17px; }
+  #skill { padding: 18px 24px; overflow: auto; min-width: 0; }
+  #skill h2 { margin: 0 0 4px; font-size: 18px; background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent; width: fit-content; }
   #skill a { font-size: 13px; word-break: break-all; color: var(--accent); }
-  #content { margin: 12px 0 0; padding: 14px; border: 1px solid var(--border); border-radius: 6px; font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
+  #content { margin: 12px 0 0; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: #8b5cf608; font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
   .placeholder { color: var(--muted); }
 </style>
 </head>

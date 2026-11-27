@@ -2,7 +2,7 @@
 // The Node client: a GitHub repository through the GitHub API, or a local directory; stdout and
 // stderr, or the local web view. Only an organisation's scan stores anything: its cache.
 import { openCache } from './cache.ts';
-import { run } from './commands.ts';
+import { ansi, run } from './commands.ts';
 import { openGitHub, parseGitHubUrl } from './core/github.ts';
 import { scanOrganisation as scanOwner, type Progress } from './core/organisation.ts';
 import { openDirectory } from './local.ts';
@@ -28,12 +28,16 @@ const progress = process.stderr.isTTY
     }
   : undefined;
 
+// Bold names and dim links only on a terminal, and not with NO_COLOR: piped stdout is plain text.
+const style = process.stdout.isTTY && !process.env.NO_COLOR ? ansi : undefined;
+
 process.exitCode = await run(process.argv.slice(2), {
   open,
   scanOrganisation,
   print: (text) => console.log(text),
   error: (text) => console.error(text),
   progress,
+  style,
   serve: async (port) => {
     const { url } = await serve({ open, scanOrganisation, port });
     console.log(`Skill Atlas: ${url} (Ctrl+C to stop)`);
