@@ -20,6 +20,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [scan-button.mp4](scan-button.mp4) | [scan-button.json](scan-button.json) | the Scan button back to `Scan` once the latest scan ends, [#34](https://github.com/vietage/ai-workshop-start/issues/34) |
 | [github-no-answer.mp4](github-no-answer.mp4) | [github-no-answer.json](github-no-answer.json) | a GitHub that never answers: the scan gives up with a clear message, in the web view and the CLI, [#44](https://github.com/vietage/ai-workshop-start/issues/44) |
 | [long-link.mp4](long-link.mp4) | [long-link.json](long-link.json) | a link over 16 KB: its scan's message, on reload too, and the API's 400 JSON, [#46](https://github.com/vietage/ai-workshop-start/issues/46) |
+| [keyboard-lists.mp4](keyboard-lists.mp4) | [keyboard-lists.json](keyboard-lists.json) | the skills and an organisation's repositories from the keyboard, [#47](https://github.com/vietage/ai-workshop-start/issues/47) |
 
 ## word-filter
 
@@ -141,3 +142,15 @@ issue's `silent-proxy.py`, on port 4199), with a 5 s limit:
 NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://127.0.0.1:4199 NO_PROXY=localhost,127.0.0.1 SKILL_ATLAS_GITHUB_TIMEOUT=5 \
   node .agents/skills/record-demo/record.mjs docs/demo/github-no-answer.json docs/demo/github-no-answer.mp4
 ```
+
+## keyboard-lists
+
+The web view on `./fixture`, then `github.com/Kotlin`, without the mouse:
+
+| Keys | Shows |
+| --- | --- |
+| Tab, Tab, Tab | *Scan*, the filter, then the selected skill, with an outline |
+| ArrowDown, ArrowDown | the focus moves; the selected skill and its SKILL.md stay |
+| Enter; ArrowDown, Space | the skill focused selected, its SKILL.md |
+| `commit` in the filter, ArrowDown | the focus on to the skills |
+| Tab, Tab, ArrowDown ×2, Enter | an organisation's repository opened, its skills |
