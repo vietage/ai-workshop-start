@@ -6,12 +6,22 @@
 - Stops with Ctrl+C
 ## The page
 - A field for the **repository link**, and a *Scan* button
-- The *Scan* button: while a scan runs, *disabled*, `Scanning…`; once the **latest** scan ends,
-  `Scan`, enabled again: after a success, a failure, an organisation, a repository opened from an
-  organisation
+- While a scan runs, a link's or a repository's of an organisation, the button is **Stop**; once
+  the **latest** scan ends, a success or a failure, or is stopped → **Scan** again
   - The latest: the last link entered, or the last repository of an organisation opened; an
     earlier scan it replaced, ended or still running, does not change the button
+  - Enter in the field while it runs → the link entered is scanned, as before; the earlier scan is
+    aborted and shows nothing more
   - A repository of the organisation clicked while another link is scanned → nothing
+  - **Stop** → the latest scan's request is aborted; the progress bar hidden; no error
+  - An organisation stopped → `<org> · N repositories · M skills` and its repositories as done so
+    far: each one scanned with its count, the rest `not scanned`, in the CLI's order, and their
+    warnings; those scanned with 0 skills not listed, as below; its tab, no skills until one is
+    selected; stopped before its repositories are listed → nothing
+  - A repository link stopped → nothing shown
+  - A repository of the organisation stopped → its tab closed, the repository forgotten: the
+    organisation's tab, no repository selected, no skills; selected again → scanned again
+  - Scan again afterwards → the whole scan, as the first time
 - The repository: `<owner>/<repo> · N skills`, its scanned commit
 - Its **skills**, sorted by name: name, the description's first sentence, path, `also in` for copies
 - A **filter** field above the skills: typing narrows them *as you type*, without scanning again,
@@ -116,5 +126,11 @@ and `content`, the SKILL.md text), `total` (the count before the filter), `warni
 - `stream=1`: `application/x-ndjson`, one JSON object a line: `{ "progress": { "scanned", "total" } }`
   as an organisation's repositories are done (0 of N first), then `{ "result": <the JSON above> }`;
   one repository: only the `result`
+  - 0 of N also has `organisation` and `repositories`, every one listed, its `commit` and
+    `skillCount` `null`; each line after it, the repository just done, `repository` as in the
+    result, and its `warnings`: what has been found so far
   - A scan that fails *before* any line → status 400, `{ "error": <message> }`, as without it;
     *after* → status 200, its last line `{ "error": <message> }`
+- The request aborted by the page (Stop, another link entered, the page closed) → the scan stops:
+  no repository started after it, its requests to GitHub aborted, nothing more written; the
+  repositories done by then are kept in the *cache*
