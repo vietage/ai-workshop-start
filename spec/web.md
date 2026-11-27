@@ -21,6 +21,17 @@
     error
   - The selected skill filtered out → the first one that matches is selected
 - A skill selected → its **SKILL.md**, the file as it is, and its link
+- The skills and an organisation's repositories: lists to select from (`role="listbox"`, each
+  `role="option"`, `aria-selected`), with the **keyboard** as with the mouse
+  - Tab reaches each list once, on its selected item, else its first; the field, *Scan*, the
+    warnings' list if shown, the filter, the skills, the SKILL.md link; in an organisation, after
+    *Scan*, the repository's tab's `×` if open, then the organisation's tab's repositories, on the
+    one marked, else its first, then the warnings' list if shown, or the repository's tab's
+    warnings' list if shown, filter, skills and link
+  - ArrowDown, ArrowUp, Home, End move the focus through the list, a visible outline on the item;
+    the selection stays until Enter or Space selects the item, as a click; the focus leaving the
+    list → Tab comes back to it on the selected item, not the one the arrows left it on
+  - ArrowDown in the filter → the focus on the skills, on the selected one
 - An **organisation** link, `github.com/<org>`: above the skills, `<org> · N repositories · M skills`,
   its **repositories** in a *column*, one a line, each with its count *next to its name* (`N skills`,
   or `not scanned`), in the CLI's order; no skills until one is selected
@@ -60,7 +71,7 @@
     it is gone; in the organisation's tab, while the repository's scan is under way (the filter
     used meanwhile too), or it fails → the organisation's as they were
   - A *limited height*: the list grows to at most 160px, and scrolls when it doesn't fit; the
-    area never grows past its title and that list
+    area never grows past its title and that list; Tab reaches the list, so the keyboard scrolls it
 - A failed scan → its message, nothing else
   - GitHub that does not answer → after the time limit (`spec/analysis.md`, *Details*), its
     message, `Cannot reach GitHub: no answer in 30 s for <url>`; the button back to `Scan`
