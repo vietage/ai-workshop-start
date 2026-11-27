@@ -17,16 +17,22 @@
 - A skill selected → its **SKILL.md**, the file as it is, and its link
 - An **organisation** link, `github.com/<org>`: above the skills, `<org> · N repositories · M skills`,
   its **repositories** in a *column*, one a line, each with its count *next to its name* (`N skills`,
-  or `not scanned`), in the CLI's order, and its warnings; no skills until one is selected
+  or `not scanned`), in the CLI's order; no skills until one is selected
   - While it scans: a **progress bar** under the field, `N of M repositories scanned`, as each
     repository is done; *hidden* once the scan ends, also when it fails; another link entered →
     the earlier scan's progress is not shown
   - A repository selected → its skills as for its link, at the commit counted; the filter as today
   - An empty repository selected → no skills, `No skills in this repository.`, no error; not
     scanned again
-  - It fails → its message; the organisation stays
+  - It fails → its message; the organisation stays, and its warnings
   - Unknown organisation → its message, nothing else
-- Warnings, under the skills; a failed scan → its message, nothing else
+- The **errors and warnings** of a scan in their *own area*, apart from the repositories and
+  skills: under the organisation, above the skills; `N warnings`, then one a line
+  - An organisation's: while it is shown, its repositories' (a failed one's too), also with a
+    repository selected; else the repository's; none → no area
+  - A *limited height*: the list grows to at most 160px, and scrolls when it doesn't fit; the
+    area never grows past its title and that list
+- A failed scan → its message, nothing else
 - The page's URL keeps the link, the skill and the filter: `?repo=<link>&skill=<path>&filter=<words>`,
   the words joined by one space;
   reload shows the same, a failed scan's message too
@@ -36,7 +42,7 @@
 ## Style
 A modern **gradient** style, light and dark as the system's colours:
 - The header on a violet-to-pink gradient; the page on a soft gradient
-- The organisation, the skills and the SKILL.md on rounded *cards*
+- The organisation, the errors and warnings, the skills and the SKILL.md on rounded *cards*
 - A selected skill or repository: a gradient tint and an accent bar; the skill's name in the
   gradient; a repository's count in a pill
 ## API

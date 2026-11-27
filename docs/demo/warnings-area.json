@@ -1,0 +1,23 @@
+{
+  "serve": true,
+  "steps": [
+    { "goto": "/", "pause": 800 },
+    { "caption": "A few warnings: their own area, above the skills" },
+    { "type": "#repo", "text": "./fixture", "pause": 300 },
+    { "click": "#scan" },
+    { "waitFor": "#skills li", "pause": 3000 },
+    { "caption": "An organisation with 50 warnings: the area stays the same height" },
+    { "fill": "#repo" },
+    { "type": "#repo", "text": "github.com/JetBrains", "pause": 300 },
+    { "click": "#scan" },
+    { "waitFor": "#repositories li", "timeout": 600000, "pause": 3000 },
+    { "caption": "It scrolls: the rest of the warnings, the repositories still in view" },
+    { "click": "#warnings" },
+    { "press": "PageDown", "pause": 1200 },
+    { "press": "PageDown", "pause": 1200 },
+    { "press": "End", "pause": 2000 },
+    { "caption": "A repository selected: its skills, under the same area" },
+    { "click": "#repositories li[data-name=\"intellij-community\"]" },
+    { "waitFor": "#skills li", "timeout": 120000, "pause": 3500 }
+  ]
+}

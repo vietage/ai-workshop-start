@@ -8,7 +8,8 @@ test('copies-and-warnings: Copies and warnings are shown', async ({ page }) => {
     await expect(item('code-style').locator('.copies')).toHaveText('also in .github/skills/code-style/SKILL.md');
     await expect(item('commits').locator('.copies')).toHaveText('also in .github/skills/commits/SKILL.md');
   });
-  await test.step('Two warnings under the skills', async () => {
+  await test.step('Two warnings in their own area above the skills', async () => {
+    await expect(page.locator('#problems-title')).toHaveText('2 warnings');
     const warnings = page.locator('#warnings li');
     await expect(warnings).toHaveCount(2);
     await expect(warnings.nth(0)).toContainText('.agents/skills/release-checklist/SKILL.md: malformed front matter');

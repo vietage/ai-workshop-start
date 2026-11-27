@@ -292,14 +292,18 @@ test('page: a skill selected → its SKILL.md as it is, and its link', { timeout
   }
 });
 
-test('page: warnings, under the skills; a failed scan → its message, nothing else', { timeout: 5_000 }, async () => {
+test('page: warnings in their own area, above the skills; a failed scan → its message, nothing else', { timeout: 5_000 }, async () => {
   const view = await page('/');
   try {
     await view.enter(FIXTURE);
     const cli = await atlas(['scan', FIXTURE]);
     const warnings = [...view.$('warnings').children].map((item) => `warning: ${item.textContent}`);
     assert.deepEqual(warnings, cli.stderr.split('\n'));
-    assert.equal(view.$('skills').nextElementSibling, view.$('warnings'));
+    assert.equal(view.$('problems-title').textContent, '2 warnings');
+    assert.equal(view.shown('problems'), true);
+    // Apart from the skills: not in them, and above them.
+    assert.equal(view.$('main').contains(view.$('problems')), false);
+    assert.equal(view.$('problems').nextElementSibling, view.$('main'));
     assert.equal(view.$('error').textContent, '');
     await view.enter('/no/such/directory');
     assert.equal(view.$('error').textContent, 'Not a GitHub URL or a readable directory: /no/such/directory');
@@ -309,8 +313,79 @@ test('page: warnings, under the skills; a failed scan → its message, nothing e
     assert.equal(view.shown('error'), true);
     assert.equal(view.shown('organisation'), false);
     assert.equal(view.shown('progress'), false);
+    assert.equal(view.shown('problems'), false);
   } finally {
     view.close();
+  }
+});
+
+/** A server whose organisation scan has `count` warnings: the recorded ones, then made-up ones. */
+async function warningServer(count: number) {
+  const { server, url } = await serve({
+    open,
+    port: 0,
+    async scanOrganisation(input, progress) {
+      const result = await scanOrganisation(input, progress);
+      const extra = Array.from({ length: count - result.warnings.length }, (_, index) => `repository-${index}: GitHub rate limit reached; try again in a minute`);
+      return { ...result, warnings: [...result.warnings, ...extra] };
+    },
+  });
+  return { port: new URL(url).port, close: () => server.close() };
+}
+
+/** The warnings' list: at most 160px high, scrolled when its warnings don't fit. */
+function assertLimited(view: Awaited<ReturnType<typeof page>>) {
+  const style = view.dom.window.getComputedStyle(view.$('warnings'));
+  assert.equal(style.maxHeight, '160px');
+  assert.equal(style.overflowY, 'auto');
+  // Only the list scrolls: the area itself and its title don't grow with it.
+  const area = view.dom.window.getComputedStyle(view.$('problems'));
+  assert.equal(area.height, 'auto');
+  assert.equal(area.maxHeight, 'none');
+  assert.equal(view.$('problems').children.length, 2);
+}
+
+test('page: a few warnings → all in the area, which has a limited height', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    assert.equal(view.shown('problems'), true);
+    assert.equal(view.$('problems-title').textContent, '3 warnings');
+    assert.equal(view.$('warnings').children.length, 3);
+    assertLimited(view);
+    // The area is apart from the organisation's repositories, under them.
+    assert.equal(view.$('organisation').contains(view.$('problems')), false);
+    assert.equal(view.$('organisation').compareDocumentPosition(view.$('problems')) & view.dom.window.Node.DOCUMENT_POSITION_FOLLOWING, view.dom.window.Node.DOCUMENT_POSITION_FOLLOWING);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: many warnings → all in the area, which does not grow past its limit and scrolls', { timeout: 5_000 }, async () => {
+  const stand = await warningServer(200);
+  const view = await page('/', stand.port);
+  try {
+    await view.enter('github.com/skillatlas');
+    assert.equal(view.$('problems-title').textContent, '200 warnings');
+    const items = [...view.$('warnings').children];
+    assert.equal(items.length, 200);
+    assert.equal(items.at(-1)!.textContent, 'repository-196: GitHub rate limit reached; try again in a minute');
+    assertLimited(view);
+    // 200 lines of 20px are far past the limit: the list is focusable, to scroll it with the keys.
+    assert.equal(view.dom.window.getComputedStyle(view.$('warnings')).lineHeight, '20px');
+    assert.equal(view.$('warnings').tabIndex, 0);
+    // The repositories and, once one is selected, its skills are still shown, the warnings with them.
+    assert.equal(view.shown('repositories'), true);
+    const scans = view.scans();
+    ([...view.$('repositories').children][0] as HTMLElement).dispatchEvent(new view.dom.window.Event('click'));
+    await view.settled(scans + 1);
+    assert.equal(view.shown('main'), true);
+    assert.deepEqual(view.names(), ['one', 'two']);
+    assert.equal(view.$('warnings').children.length, 200);
+    assertLimited(view);
+  } finally {
+    view.close();
+    stand.close();
   }
 });
 
@@ -634,7 +709,7 @@ test('page: an organisation link → its repositories with their counts; selecti
       repositories().map((item) => [view.text(item, '.name'), view.text(item, '.count')]),
       [['alpha', '2 skills'], ['Beta', '2 skills'], ['example-tools', '2 skills'], ['Docs', '0 skills'], ['empty', '0 skills'], ['huge', '0 skills'], ['broken', 'not scanned']],
     );
-    assert.equal(view.$('org-warnings').children.length, 3);
+    assert.equal(view.$('warnings').children.length, 3);
     // No repository selected yet: no skills.
     assert.equal(view.$('main').hidden, true);
     assert.deepEqual(view.search(), { repo: 'github.com/skillatlas' });
@@ -645,6 +720,8 @@ test('page: an organisation link → its repositories with their counts; selecti
     assert.equal(repositories()[1].getAttribute('aria-selected'), 'true');
     assert.equal(view.$('main').hidden, false);
     assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    // The organisation's warnings stay: they include each repository's.
+    assert.equal(view.$('warnings').children.length, 3);
     assert.deepEqual(view.names(), ['four', 'three']);
     assert.equal(view.$('skill').querySelector('h2')!.textContent, 'four');
     // The filter narrows the selected repository's skills, as today.
@@ -683,7 +760,7 @@ test('page: a gradient style: the header, the page, cards, the selected skill an
     assert.match(style(document.querySelector('header')!).backgroundImage, /^linear-gradient\(/);
     assert.match(style(document.body).backgroundImage, /^linear-gradient\(/);
     // Rounded cards: jsdom gives `0px` for an element with no radius.
-    for (const id of ['organisation', 'list', 'skill']) assert.match(style(view.$(id)).borderRadius, /^[1-9]\d*px$/, id);
+    for (const id of ['organisation', 'problems', 'list', 'skill']) assert.match(style(view.$(id)).borderRadius, /^[1-9]\d*px$/, id);
     const selected = view.items().find((item) => item.getAttribute('aria-selected') === 'true')!;
     const other = view.items().find((item) => item.getAttribute('aria-selected') === 'false')!;
     // The selected skill: a gradient tint and an accent bar; the others neither.
@@ -781,6 +858,8 @@ test('page: a repository of the organisation that fails → its message; the org
     assert.equal(view.$('error').textContent, 'GitHub rate limit reached; try again in a minute');
     assert.equal(view.$('organisation').hidden, false);
     assert.equal(view.$('main').hidden, true);
+    assert.equal(view.shown('problems'), true);
+    assert.equal(view.$('warnings').children.length, 3);
     assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'broken' });
     // A repository link after it: no organisation.
     await view.enter('https://github.com/JetBrains/example');
@@ -832,6 +911,7 @@ test('page: an unknown organisation → its message, nothing else', { timeout: 5
     assert.equal(view.$('error').textContent, 'Organisation not found: https://github.com/no-such-organisation');
     assert.equal(view.$('organisation').hidden, true);
     assert.equal(view.$('main').hidden, true);
+    assert.equal(view.shown('problems'), false);
   } finally {
     view.close();
   }

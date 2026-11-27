@@ -15,6 +15,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [failed-scan.mp4](failed-scan.mp4) | [failed-scan.json](failed-scan.json) | a failed scan shows its message and nothing else, [#20](https://github.com/vietage/ai-workshop-start/issues/20) |
 | [organisation-cache.mp4](organisation-cache.mp4) | [organisation-cache.json](organisation-cache.json) | the cache of an organisation's scan, [#22](https://github.com/vietage/ai-workshop-start/issues/22) |
 | [nicer-skill-list.mp4](nicer-skill-list.mp4) | [nicer-skill-list.json](nicer-skill-list.json) | the gradient style, an organisation's repositories in a column, [#30](https://github.com/vietage/ai-workshop-start/issues/30) |
+| [warnings-area.mp4](warnings-area.mp4) | [warnings-area.json](warnings-area.json) | a scan's warnings in their own area of limited height, with a scrollbar, [#36](https://github.com/vietage/ai-workshop-start/issues/36) |
 
 ## word-filter
 
@@ -84,3 +85,15 @@ The web view on `./fixture`, then the `Kotlin` organisation, on its default bran
 
 The CLI's bold names and dim links are drawn only when stdout is a terminal
 ([spec/cli.md](../../spec/cli.md)), which the recorder's terminal is not: it shows the plain text.
+
+## warnings-area
+
+The web view on `./fixture`, then the `JetBrains` organisation, on its default branches (549
+repositories, 50 warnings):
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `./fixture`, Scan | `2 warnings` in a card above the skills | their own area, apart from the skills |
+| `github.com/JetBrains`, Scan | `50 warnings`, the area no taller; the repositories above it | a limited height |
+| the list clicked, PageDown, End | the list scrolls to its last warning | scrolled when it doesn't fit |
+| `intellij-community` selected | its skills under the same area, still 50 warnings | the organisation's warnings stay |

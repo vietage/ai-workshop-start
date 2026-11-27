@@ -33,7 +33,8 @@ the cache, and a missing or broken one never fails a scan. One repository's scan
 
 Or in a browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
 for the repository or organisation link (an organisation's repositories in a column, each with its
-skill count), its skills (with a field to filter them) and each one's SKILL.md, in a gradient style,
+skill count), the scan's warnings in an area of limited height that scrolls, its skills (with a
+field to filter them) and each one's SKILL.md, in a gradient style,
 light or dark as the system's colours (`--port <port>` for another port).
 
 Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests. `npm run qa` tests the
