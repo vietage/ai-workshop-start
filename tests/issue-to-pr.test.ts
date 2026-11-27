@@ -17,7 +17,8 @@ const TS = '1764236769.000100';
 
 type Request = { method: string; path: string; query: URLSearchParams; authorization?: string; body: any };
 const received: Request[] = [];
-/** What the next conversations.replies calls answer, one per call; the last one repeats. */
+/** What the next conversations.replies calls answer, one per call; the last one repeats.
+ *  429: rate limited; 'drop': the connection is closed with no answer (a network failure). */
 let replies: unknown[] = [];
 let postAnswer: unknown = {};
 let repliesCalls = 0;
@@ -36,6 +37,7 @@ const server = createServer(async (request: IncomingMessage, response) => {
   if (method === 'conversations.replies') {
     const answer = replies[Math.min(repliesCalls++, replies.length - 1)];
     if (answer === 429) return response.writeHead(429, { 'Retry-After': '1' }).end();
+    if (answer === 'drop') return request.socket.destroy();
     return json(200, answer);
   }
   json(404, { ok: false, error: 'unknown_method' });
@@ -105,6 +107,15 @@ test('rate limited while waiting: checks the thread again at the next interval',
   const { code, stdout, stderr } = await ask([QUESTION]);
   assert.equal(code, 0, stderr);
   assert.equal(stdout, 'a\n');
+});
+
+test('a read of the thread fails on the network: checks the thread again at the next interval', async () => {
+  replies = ['drop', thread({ ts: '1764236800.000300', user: 'U1', text: 'a' })];
+  const { code, stdout, stderr } = await ask([QUESTION]);
+  assert.equal(code, 0, stderr);
+  assert.equal(stdout, 'a\n');
+  assert.equal(received.filter((r) => r.method === 'conversations.replies').length, 2);
+  assert.equal(received.filter((r) => r.method === 'chat.postMessage').length, 1, 'no note on an answer');
 });
 
 test('no reply in SLACK_REPLY_TIMEOUT: a note in the thread that the agent decides, exit 2', async () => {
