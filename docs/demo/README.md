@@ -18,6 +18,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [hide-empty-repositories.mp4](hide-empty-repositories.mp4) | [hide-empty-repositories.json](hide-empty-repositories.json) | an organisation's list without its repositories with 0 skills, [#39](https://github.com/vietage/ai-workshop-start/issues/39) |
 | [repository-tabs.mp4](repository-tabs.mp4) | [repository-tabs.json](repository-tabs.json) | an organisation's repository in a tab of its own, in the page, [#37](https://github.com/vietage/ai-workshop-start/issues/37) |
 | [scan-button.mp4](scan-button.mp4) | [scan-button.json](scan-button.json) | the Scan button back to `Scan` once the latest scan ends, [#34](https://github.com/vietage/ai-workshop-start/issues/34) |
+| [github-no-answer.mp4](github-no-answer.mp4) | [github-no-answer.json](github-no-answer.json) | a GitHub that never answers: the scan gives up with a clear message, in the web view and the CLI, [#44](https://github.com/vietage/ai-workshop-start/issues/44) |
 | [long-link.mp4](long-link.mp4) | [long-link.json](long-link.json) | a link over 16 KB: its scan's message, on reload too, and the API's 400 JSON, [#46](https://github.com/vietage/ai-workshop-start/issues/46) |
 
 ## word-filter
@@ -130,3 +131,13 @@ not exist:
 
 A scan that never ends (the case of [#34](https://github.com/vietage/ai-workshop-start/issues/34))
 cannot be recorded against GitHub; `tests/web.test.ts` stalls one in a stand-in server.
+
+## github-no-answer
+
+Recorded through a stand-in for GitHub that accepts every connection and never answers (the
+issue's `silent-proxy.py`, on port 4199), with a 5 s limit:
+
+```bash
+NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://127.0.0.1:4199 NO_PROXY=localhost,127.0.0.1 SKILL_ATLAS_GITHUB_TIMEOUT=5 \
+  node .agents/skills/record-demo/record.mjs docs/demo/github-no-answer.json docs/demo/github-no-answer.mp4
+```

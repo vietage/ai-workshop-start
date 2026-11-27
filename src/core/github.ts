@@ -3,13 +3,24 @@ import { SKILL_ROOTS } from './find.ts';
 import type { Source } from './scan.ts';
 
 /** The part of `fetch` the core uses, so tests and the browser can pass their own. */
-export type Fetch = (url: string, init?: { headers?: Record<string, string> }) => Promise<Response>;
+export type Fetch = (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<Response>;
 
 export type GitHubOptions = {
   fetch: Fetch;
   /** With a token, skills are found through code search; without it, through the tree. */
   token?: string;
+  /**
+   * How long a request, its answer and its body, may take before it gives up, in ms; 30 s by
+   * default. Longer than a timer can hold (`TIMER_LIMIT`, about 24.8 days), or `Infinity`: no limit.
+   */
+  timeout?: number;
 };
+
+/** A request GitHub does not answer in time gives up: a silent GitHub or a stalled network never hangs a scan. */
+export const GITHUB_TIMEOUT = 30_000;
+
+/** The longest delay `setTimeout` keeps; a longer one fires after 1 ms instead. */
+export const TIMER_LIMIT = 2 ** 31 - 1;
 
 const API = 'https://api.github.com';
 const RAW = 'https://raw.githubusercontent.com';
@@ -174,21 +185,43 @@ function files(tree: Tree): string[] {
 
 type Client = ReturnType<typeof client>;
 
-function client({ fetch, token }: GitHubOptions) {
+function client({ fetch, token, timeout = GITHUB_TIMEOUT }: GitHubOptions) {
   const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
   if (token) headers.Authorization = `Bearer ${token}`;
   const answers = new Map<string, Promise<unknown>>(); // the root tree is asked for once per skill root
 
-  async function get(url: string, init?: { headers: Record<string, string> }): Promise<Response> {
+  /**
+   * `work`, the request and the reading of its answer, given up after `timeout`: the signal aborts
+   * the request, and the race ends even a fetch that ignores the signal. A limit too long for a
+   * timer is no limit.
+   */
+  async function timed<T>(url: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const controller = new AbortController();
+    if (!(timeout <= TIMER_LIMIT)) return work(controller.signal);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new AtlasError(`Cannot reach GitHub: no answer in ${seconds(timeout)} for ${url}`));
+        controller.abort();
+      }, timeout);
+    });
     try {
-      return await fetch(url, init);
+      return await Promise.race([work(controller.signal), expired]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function get(url: string, signal: AbortSignal, extra?: { headers: Record<string, string> }): Promise<Response> {
+    try {
+      return await fetch(url, { ...extra, signal });
     } catch (error) {
       throw new AtlasError(`Cannot reach GitHub: ${describe(error)}`);
     }
   }
 
-  async function request(url: string, notFound: string): Promise<unknown> {
-    const response = await get(url, { headers });
+  async function request(url: string, notFound: string, signal: AbortSignal): Promise<unknown> {
+    const response = await get(url, signal, { headers });
     if (response.ok) return readBody(response, url, () => response.json());
     const body: unknown = await response.json().catch(() => undefined);
     const message = (body as { message?: unknown } | undefined)?.message;
@@ -206,15 +239,17 @@ function client({ fetch, token }: GitHubOptions) {
   return {
     /** A GitHub API answer; `notFound` explains a 404. */
     json<T>(url: string, notFound = `Not found on GitHub: ${url}`): Promise<T> {
-      if (!answers.has(url)) answers.set(url, request(url, notFound));
+      if (!answers.has(url)) answers.set(url, timed(url, (signal) => request(url, notFound, signal)));
       return answers.get(url) as Promise<T>;
     },
     /** A file's bytes at the scanned commit, or undefined if it is not there. */
-    async raw(url: string): Promise<Uint8Array | undefined> {
-      const response = await get(url);
-      if (response.status === 404) return undefined;
-      if (!response.ok) throw new AtlasError(`GitHub answered ${response.status} for ${url}`);
-      return new Uint8Array(await readBody(response, url, () => response.arrayBuffer()));
+    raw(url: string): Promise<Uint8Array | undefined> {
+      return timed(url, async (signal) => {
+        const response = await get(url, signal);
+        if (response.status === 404) return undefined;
+        if (!response.ok) throw new AtlasError(`GitHub answered ${response.status} for ${url}`);
+        return new Uint8Array(await readBody(response, url, () => response.arrayBuffer()));
+      });
     },
   };
 }
@@ -227,6 +262,11 @@ async function readBody<T>(response: Response, url: string, read: () => Promise<
     if (error instanceof SyntaxError) throw new AtlasError(`GitHub answered ${response.status} for ${url}, but not with JSON`);
     throw new AtlasError(`Cannot read GitHub's answer for ${url}: ${describe(error)}`);
   }
+}
+
+/** `30 s`, `1.5 s`, `0.2 s`. */
+function seconds(ms: number): string {
+  return `${Number((ms / 1000).toFixed(3))} s`;
 }
 
 function encodePath(path: string): string {
