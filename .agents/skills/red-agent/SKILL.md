@@ -146,8 +146,9 @@ node .agents/skills/red-agent/file-bug.mjs --key <key> --title "<what goes wrong
 
 - `<key>`: short, lowercase words joined by `-`, naming the bug, e.g. `filter-regex-characters`.
   The same bug found again gets the same key.
-- It refuses a body without the three sections, an *Expected* that cites no `spec/` file, or a
-  missing video (exit 2).
+- It refuses a body without the three sections, an *Expected* that cites no `spec/` file, a
+  missing video, or a mistyped option or one without its value (exit 2). Exit 1 means `gh` or
+  `git` failed.
 - It uploads the video to the `red-agent-recordings` pre-release and files
   `[Red agent] <title>`, labelled `Delegated to AI`, `bug` and `red-agent`. The body has the
   commit, the video's link, your sections and the key.
