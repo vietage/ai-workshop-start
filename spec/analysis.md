@@ -71,6 +71,11 @@ Skill: id = `repo:path`, name, description, commit, copies
 - **Progress**: `scanned` of `total` repositories, the archived ones and forks not counted; *0 of N*
   once listed, then one more as each repository is done, whatever its outcome, the failed ones too;
   nothing before the list (an unknown organisation)
+  - With *0 of N*, the organisation and every repository listed; with each one more, the repository
+    just done, as in the output, and its warnings
+- **Stopped** (the web view's Stop): no repository started after it, the requests under way
+  aborted, no output; the repositories done by then are kept in the *cache*, one cut short is not
+  - Until it is stopped, each request still gives up after the time limit (*Details*)
 - *8 repositories* at a time; no time budget: JetBrains, 549 repositories, in about a minute with
   `GITHUB_TOKEN`; less with a warm *cache*
 - No filter: it is for one repository

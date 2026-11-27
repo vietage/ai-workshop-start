@@ -38,7 +38,9 @@ for the repository or organisation link (an organisation's repositories in a col
 skill count; a repository selected opens its skills in a tab of its own in the page, next to the
 organisation's tab), the scan's warnings in an area of limited height that scrolls, its skills (with a
 field to filter them) and each one's SKILL.md, in a gradient style,
-light or dark as the system's colours (`--port <port>` for another port).
+light or dark as the system's colours (`--port <port>` for another port). While a scan runs, the
+*Scan* button is **Stop**: it stops the scan, on the server too, and keeps what has been found so far,
+an organisation's repositories already scanned with their counts, the rest `not scanned`.
 
 Set `GITHUB_TOKEN` for a higher GitHub rate limit. A GitHub request that gets no answer gives up after 30 s with
 `Cannot reach GitHub: no answer in 30 s for <url>` (`SKILL_ATLAS_GITHUB_TIMEOUT=<seconds>` for another limit, `Infinity` for none). `npm test` runs the tests. `npm run qa` tests the

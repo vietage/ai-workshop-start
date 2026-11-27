@@ -4,30 +4,30 @@ import { createServer, type Server } from 'node:http';
 import { AtlasError } from './core/errors.ts';
 import { parseGitHubOwner } from './core/github.ts';
 import { firstSentence, skillLink } from './core/model.ts';
-import type { OrganisationResult, Progress } from './core/organisation.ts';
+import type { OrganisationRepository, OrganisationResult, Progress } from './core/organisation.ts';
 import { scan, type Source } from './core/scan.ts';
 import { PAGE } from './web-page.ts';
 
 export type WebOptions = {
-  /** Opens what the user asked to scan, as the CLI does. */
-  open(input: string): Promise<Source>;
+  /** Opens what the user asked to scan, as the CLI does; `signal` stops its requests. */
+  open(input: string, signal?: AbortSignal): Promise<Source>;
   /**
    * Scans every repository of a GitHub organisation, as the CLI does; `progress` as each one is
-   * done; with `refresh`, every repository again, whatever the cache has.
+   * done; with `refresh`, every repository again, whatever the cache has; `signal` stops it.
    */
-  scanOrganisation(input: string, progress?: Progress, refresh?: boolean): Promise<OrganisationResult>;
+  scanOrganisation(input: string, progress?: Progress, refresh?: boolean, signal?: AbortSignal): Promise<OrganisationResult>;
 };
 
 /**
  * The scan as JSON: each skill with its first sentence, its link and its SKILL.md text; with a
  * filter, only the skills that match every word of it, and `total`, the count before the filter.
  */
-export async function scanJson(input: string, { open, scanOrganisation }: WebOptions, filter?: string, progress?: Progress, refresh?: boolean) {
+export async function scanJson(input: string, { open, scanOrganisation }: WebOptions, filter?: string, progress?: Progress, refresh?: boolean, signal?: AbortSignal) {
   if (parseGitHubOwner(input)) {
     if (filter) throw new AtlasError('filter works on one repository, not on an organisation');
-    return organisationJson(await scanOrganisation(input, progress, refresh));
+    return organisationJson(await scanOrganisation(input, progress, refresh, signal));
   }
-  const source = await open(input);
+  const source = await open(input, signal);
   // Each file is read once: the text shown is the text the scan parsed.
   const texts = new Map<string, Promise<Uint8Array | undefined>>();
   const read = (path: string) => {
@@ -54,16 +54,18 @@ export async function scanJson(input: string, { open, scanOrganisation }: WebOpt
 function organisationJson({ organisation, repositories, skills, warnings }: OrganisationResult) {
   return {
     organisation,
-    repositories: repositories.map(({ name, url, commit, skillCount, warnings }) => ({
-      name,
-      url,
-      commit: commit ?? null,
-      skillCount: skillCount ?? null,
-      warnings,
-    })),
+    repositories: repositories.map(repositoryJson),
     skills,
     warnings,
   };
+}
+
+/**
+ * One repository of an organisation: `null` for its commit and count until it is scanned, or when
+ * it failed; its own warnings, without its name.
+ */
+function repositoryJson({ name, url, commit, skillCount, warnings }: OrganisationRepository) {
+  return { name, url, commit: commit ?? null, skillCount: skillCount ?? null, warnings };
 }
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -98,22 +100,37 @@ export function createWebServer(options: WebOptions): Server {
     const filter = url.searchParams.get('filter')?.trim() || undefined;
     // cache=0: an organisation's repositories are all scanned again, as with --no-cache.
     const refresh = url.searchParams.get('cache') === '0';
+    // The page gone, or its scan stopped: the scan stops too, and nothing more is written.
+    const stop = new AbortController();
+    response.on('close', () => {
+      if (!response.writableFinished) stop.abort(new AtlasError('The scan was stopped'));
+    });
     // stream=1: one JSON object a line, `{ progress }` as an organisation's repositories are done,
     // then `{ result }`, or `{ error }` once the lines have started; before that, as without it.
     let started = false;
     const line = (body: unknown) => {
+      if (stop.signal.aborted) return;
       if (!started) response.writeHead(200, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store' });
       started = true;
       response.write(JSON.stringify(body) + '\n');
     };
     const stream = url.searchParams.get('stream') === '1';
-    const progress = stream ? (scanned: number, total: number) => line({ progress: { scanned, total } }) : undefined;
+    // With 0, the organisation and its repositories, none scanned yet; then each repository done:
+    // what the page keeps when its scan is stopped.
+    const progress: Progress | undefined = stream
+      ? (scanned, total, update) => {
+          const found = !update ? {} : 'repository' in update ? { ...update, repository: repositoryJson(update.repository) } : { ...update, repositories: update.repositories.map(repositoryJson) };
+          line({ progress: { scanned, total }, ...found });
+        }
+      : undefined;
     try {
-      const result = await scanJson(repo, options, filter, progress, refresh);
+      const result = await scanJson(repo, options, filter, progress, refresh, stop.signal);
+      if (stop.signal.aborted) return;
       if (!stream) return json(200, result);
       line({ result });
       response.end();
     } catch (error) {
+      if (stop.signal.aborted) return;
       const message = error instanceof AtlasError ? error.message : `Unexpected error: ${error instanceof Error ? error.message : String(error)}`;
       if (started) {
         line({ error: message });

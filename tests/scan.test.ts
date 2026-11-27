@@ -759,6 +759,78 @@ test('organisation: progress → 0 of the total once listed, then one more as ea
   assert.deepEqual(none, [[0, 0]]);
 });
 
+test('organisation: progress → with 0, the organisation and every repository listed; then the repository just done and its warnings', async () => {
+  const updates: unknown[] = [];
+  const result = await scanOrganisation('github.com/skillatlas', { fetch: github, token: 'test', concurrency: 1, progress: (_scanned, _total, update) => updates.push(update) });
+  const url = (name: string) => `https://github.com/SkillAtlas/${name}`;
+  const listed = ['example-tools', 'Docs', 'alpha', 'huge', 'Beta', 'broken', 'empty'];
+  assert.deepEqual(updates[0], { organisation: result.organisation, repositories: listed.map((name) => ({ name, url: url(name), warnings: [] })) });
+  // One at a time: in the order listed, each as in the result, with its own warnings.
+  const byName = (name: string) => result.repositories.find((repository) => repository.name === name);
+  assert.deepEqual(
+    updates.slice(1),
+    listed.map((name) => ({ repository: byName(name), warnings: result.warnings.filter((warning) => warning.startsWith(name + ': ')) })),
+  );
+});
+
+test('organisation stopped: no repository started after it, the requests under way aborted, it rejects with the reason', async () => {
+  const stop = new AbortController();
+  const urls: string[] = [];
+  const signals: (AbortSignal | undefined)[] = [];
+  const seen: number[] = [];
+  const scanning = scanOrganisation('github.com/skillatlas', {
+    fetch: (url, init) => {
+      urls.push(url);
+      signals.push(init?.signal);
+      return github(url, init);
+    },
+    token: 'test',
+    concurrency: 1,
+    signal: stop.signal,
+    // Stopped once 2 repositories are done: example-tools and Docs.
+    progress: (scanned) => {
+      seen.push(scanned);
+      if (scanned === 2) stop.abort(new AtlasError('The scan was stopped'));
+    },
+  });
+  await assert.rejects(scanning, { message: 'The scan was stopped' });
+  assert.deepEqual(seen, [0, 1, 2]);
+  const scanned = [...new Set(urls.flatMap((url) => /\/repos\/SkillAtlas\/([^/]+)/.exec(url)?.[1] ?? []))];
+  assert.deepEqual(scanned, ['example-tools', 'Docs']);
+  // Every request with a signal the stop aborts, so a request under way is aborted with it.
+  assert.ok(signals.length && signals.every((signal) => signal?.aborted));
+  // Already stopped: nothing is asked for.
+  urls.length = 0;
+  await assert.rejects(scanOrganisation('github.com/skillatlas', { fetch: (url) => (urls.push(url), github(url)), signal: stop.signal }));
+  assert.deepEqual(urls, []);
+});
+
+test('organisation with a stop signal, not stopped: a request GitHub does not answer still gives up after the time limit, and is aborted', async () => {
+  const stop = new AbortController();
+  const aborted: string[] = [];
+  const result = await scanOrganisation('github.com/skillatlas', {
+    // alpha's commit never answers until its request is aborted.
+    fetch: (url, init) => {
+      if (!url.endsWith('/repos/SkillAtlas/alpha/commits/main')) return github(url, init);
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          aborted.push(url);
+          reject(init.signal!.reason);
+        });
+      });
+    },
+    token: 'test',
+    timeout: 200,
+    signal: stop.signal,
+  });
+  assert.ok(
+    result.warnings.includes('alpha: not scanned: Cannot reach GitHub: no answer in 0.2 s for https://api.github.com/repos/SkillAtlas/alpha/commits/main'),
+  );
+  // The request itself aborted by its time limit, not only left behind.
+  assert.deepEqual(aborted, ['https://api.github.com/repos/SkillAtlas/alpha/commits/main']);
+  assert.equal(stop.signal.aborted, false);
+});
+
 test('organisation on a terminal: a progress bar, scanned/total repositories, hidden before the result is printed', async () => {
   const scanned = await atlas(['scan', 'github.com/skillatlas'], { terminal: true });
   assert.equal(scanned.code, 0);

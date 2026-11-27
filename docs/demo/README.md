@@ -22,6 +22,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [long-link.mp4](long-link.mp4) | [long-link.json](long-link.json) | a link over 16 KB: its scan's message, on reload too, and the API's 400 JSON, [#46](https://github.com/vietage/ai-workshop-start/issues/46) |
 | [warnings-area.mp4](warnings-area.mp4) | [warnings-area.json](warnings-area.json) | a scan's warnings in their own area of limited height, with a scrollbar, [#36](https://github.com/vietage/ai-workshop-start/issues/36) |
 | [keyboard-lists.mp4](keyboard-lists.mp4) | [keyboard-lists.json](keyboard-lists.json) | the skills and an organisation's repositories from the keyboard, [#47](https://github.com/vietage/ai-workshop-start/issues/47) |
+| [stop-scan.mp4](stop-scan.mp4) | [stop-scan.json](stop-scan.json) | Stop a running scan, keeping what has been found so far, [#38](https://github.com/vietage/ai-workshop-start/issues/38) |
 
 ## word-filter
 
@@ -167,3 +168,15 @@ The web view on `./fixture`, then `github.com/Kotlin`, without the mouse:
 | Enter; ArrowDown, Space | the skill focused selected, its SKILL.md |
 | `commit` in the filter, ArrowDown | the focus on to the skills |
 | Tab, Tab, ArrowDown ×2, Enter | an organisation's repository opened, its skills |
+
+## stop-scan
+
+The web view on the `Kotlin` organisation, on its default branches (107 repositories), with a cache
+of its own, removed first (`SKILL_ATLAS_CACHE=/tmp/stop-demo/cache.db`):
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `github.com/Kotlin`, Scan | the button is **Stop**, the progress bar fills | Stop while a scan runs |
+| Stop, at 57 of 107 | `Kotlin · 107 repositories · 3 skills`, the rest `not scanned`, no bar, **Scan** | what has been found so far is kept |
+| a repository not scanned, selected | its skills, scanned now | a not scanned repository can still be opened |
+| Scan again | every repository with its count, 20 skills | scan again afterwards works; the cache keeps the stopped scan's |

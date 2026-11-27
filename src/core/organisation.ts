@@ -45,8 +45,17 @@ export type RepositoryCache = {
   close(): string[];
 };
 
-/** How far a scan of an organisation has gone: `scanned` of its `total` repositories. */
-export type Progress = (scanned: number, total: number) => void;
+/**
+ * How far a scan of an organisation has gone: `scanned` of its `total` repositories; with 0, the
+ * organisation and every repository listed, not scanned yet, no warnings; then the repository just
+ * done, with its own warnings, and those as in the result's, `<name>: <warning>`: what has been
+ * found so far.
+ */
+export type Progress = (scanned: number, total: number, update?: ProgressUpdate) => void;
+
+export type ProgressUpdate =
+  | { organisation: OrganisationResult['organisation']; repositories: OrganisationRepository[] }
+  | { repository: OrganisationRepository; warnings: string[] };
 
 export type OrganisationOptions = GitHubOptions & {
   /** How many repositories are scanned at the same time. */
@@ -60,6 +69,11 @@ export type OrganisationOptions = GitHubOptions & {
   cache?: () => Promise<RepositoryCache>;
   /** Scans every repository again, whatever the cache has, and keeps the new results. */
   refresh?: boolean;
+  /**
+   * Stops the scan: no repository is started after it, the requests under way are aborted, and the
+   * scan rejects with the signal's reason; the repositories done by then are kept in the cache.
+   */
+  signal?: AbortSignal;
 };
 
 /**
@@ -72,19 +86,30 @@ export type OrganisationOptions = GitHubOptions & {
  * The result is the same either way.
  */
 export async function scanOrganisation(input: string, options: OrganisationOptions): Promise<OrganisationResult> {
+  const { signal } = options;
+  signal?.throwIfAborted();
+  // Every request of the scan stops with it, and still gives up on its own timeout.
+  const { fetch } = options;
+  if (signal) options = { ...options, fetch: (url, init) => fetch(url, { ...init, signal: withStop(init?.signal, signal) }) };
   const owner = await listRepositories(input, options);
+  signal?.throwIfAborted();
   const total = owner.repositories.length;
   let scanned = 0;
-  options.progress?.(0, total);
+  options.progress?.(0, total, {
+    organisation: { name: owner.name, url: owner.url },
+    repositories: owner.repositories.map((listed) => ({ name: listed.name, url: `https://github.com/${listed.id}`, warnings: [] })),
+  });
   const cache = await options.cache?.();
   let results: OrganisationRepository[];
   let cacheWarnings: string[] = [];
   try {
-    results = await pool(owner.repositories, options.concurrency ?? 8, async (listed) => {
+    results = await pool(owner.repositories, options.concurrency ?? 8, signal, async (listed) => {
       const result = await scanListed(listed, options, cache);
-      options.progress?.(++scanned, total);
+      // A repository cut short by the stop is not done: nothing more is told.
+      if (!signal?.aborted) options.progress?.(++scanned, total, { repository: result, warnings: result.warnings.map((warning) => `${result.name}: ${warning}`) });
       return result;
     });
+    signal?.throwIfAborted();
     cache?.prune(owner.name, owner.repositories.map((repository) => repository.id));
   } finally {
     cacheWarnings = cache?.close() ?? [];
@@ -111,10 +136,13 @@ async function scanListed(listed: ListedRepository, options: OrganisationOptions
   const url = `https://github.com/${listed.id}`;
   try {
     const { commit, source } = await openListed(listed, options);
+    options.signal?.throwIfAborted();
     const kept = options.refresh ? undefined : cache?.get(listed.id);
     let entry = kept?.commit === commit ? kept : undefined;
     if (!entry) {
       const result = await scan(await source());
+      // Stopped meanwhile: what it found may be cut short; it is not kept.
+      options.signal?.throwIfAborted();
       entry = { commit, skillCount: result.total, warnings: result.warnings };
       cache?.set(listed.id, entry);
     }
@@ -126,6 +154,11 @@ async function scanListed(listed: ListedRepository, options: OrganisationOptions
     const message = error instanceof AtlasError ? error.message : `Unexpected error: ${describe(error)}`;
     return { name: listed.name, url, warnings: [`not scanned: ${message}`] };
   }
+}
+
+/** A request's own signal (its timeout) and the scan's stop: either one aborts it. */
+export function withStop(own: AbortSignal | undefined, stop: AbortSignal | undefined): AbortSignal | undefined {
+  return own && stop ? AbortSignal.any([own, stop]) : (own ?? stop);
 }
 
 function describe(error: unknown): string {
@@ -149,12 +182,15 @@ export function listedRepositories(repositories: OrganisationRepository[]): Orga
   return repositories.filter((repository) => repository.skillCount !== 0);
 }
 
-/** `work` for every item, at most `limit` at the same time; the results in the items' order. */
-async function pool<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+/**
+ * `work` for every item, at most `limit` at the same time; the results in the items' order. Once
+ * `signal` is aborted, no item is started.
+ */
+async function pool<T, R>(items: T[], limit: number, signal: AbortSignal | undefined, work: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
   const worker = async () => {
-    while (next < items.length) {
+    while (next < items.length && !signal?.aborted) {
       const index = next++;
       results[index] = await work(items[index]);
     }

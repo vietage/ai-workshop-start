@@ -8,7 +8,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { after, test } from 'node:test';
-import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, open, ORGANISATION_COMMIT, scanOrganisation, silentGitHub } from './helpers.ts';
+import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, github, open, ORGANISATION_COMMIT, scanOrganisation, silentGitHub } from './helpers.ts';
+import { openGitHub, parseGitHubUrl, type Fetch } from '../src/core/github.ts';
+import { scanOrganisation as scanOwner } from '../src/core/organisation.ts';
 import { serve, type WebOptions } from '../src/web.ts';
 import { AtlasError } from '../src/core/errors.ts';
 
@@ -253,19 +255,20 @@ async function page(path: string, at = port) {
     url: `http://localhost:${at}${path}`,
     runScripts: 'dangerously',
     beforeParse(window) {
-      window.fetch = ((input: string) => {
+      window.fetch = ((input: string, init?: RequestInit) => {
         scans++;
-        return fetch(new URL(input, `http://127.0.0.1:${at}`));
+        return fetch(new URL(input, `http://127.0.0.1:${at}`), init);
       }) as typeof fetch;
-      // As in a browser: jsdom has no TextDecoder of its own.
-      (window as unknown as { TextDecoder: typeof TextDecoder }).TextDecoder = TextDecoder;
+      // As in a browser: jsdom has no TextDecoder of its own, and its AbortSignal is not the one
+      // this fetch takes.
+      Object.assign(window, { TextDecoder, AbortController });
     },
   });
   const document = dom.window.document;
   const $ = (id: string) => document.getElementById(id)!;
-  /** Waits for the scans started so far to be shown. */
+  /** Waits for the scans started so far to be shown: the button is Scan again. */
   const settled = async (count: number) => {
-    while (scans < count || ($('scan') as HTMLButtonElement).disabled) await new Promise((r) => setTimeout(r, 10));
+    while (scans < count || $('scan').textContent !== 'Scan') await new Promise((r) => setTimeout(r, 10));
   };
   const enter = async (repo: string) => {
     const before = scans;
@@ -894,6 +897,7 @@ test('page: an organisation link → its repositories with their counts; selecti
     await view.settled(scans + 1);
     assert.equal(repositories()[1].getAttribute('aria-selected'), 'true');
     assert.equal(view.$('main').hidden, false);
+    assert.equal(view.$('error').textContent, '');
     assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
     // The organisation's warnings stay: they include each repository's.
     assert.equal(view.$('warnings').children.length, 3);
@@ -1590,11 +1594,25 @@ async function stoppedServer(scanned: number, total: number) {
 }
 
 test('API: stream=1, an organisation → a line per repository done, 0 of N first, then the same JSON as without it', async () => {
-  const { status, type, lines } = await streamed('github.com/skillatlas');
+  const { status, type, lines } = (await streamed('github.com/skillatlas')) as { status: number; type: string; lines: Record<string, any>[] };
   assert.equal(status, 200);
   assert.equal(type, 'application/x-ndjson; charset=utf-8');
-  assert.deepEqual(lines.slice(0, -1), [0, 1, 2, 3, 4, 5, 6, 7].map((scanned) => ({ progress: { scanned, total: 7 } })));
-  assert.deepEqual(lines.at(-1), { result: (await scan('github.com/skillatlas')).body });
+  assert.deepEqual(lines.slice(0, -1).map((line) => line.progress), [0, 1, 2, 3, 4, 5, 6, 7].map((scanned) => ({ scanned, total: 7 })));
+  const { body: result } = await scan('github.com/skillatlas');
+  assert.deepEqual(lines.at(-1), { result });
+  // 0 of N: the organisation and every repository listed, none scanned yet.
+  const notScanned = (name: string) => ({ name, url: `https://github.com/SkillAtlas/${name}`, commit: null, skillCount: null, warnings: [] });
+  assert.deepEqual(lines[0], {
+    progress: { scanned: 0, total: 7 },
+    organisation: result.organisation,
+    repositories: ['example-tools', 'Docs', 'alpha', 'huge', 'Beta', 'broken', 'empty'].map(notScanned),
+  });
+  // Then each repository just done, as in the result, and its warnings, whatever order they end in.
+  const done = lines.slice(1, -1);
+  assert.deepEqual(done.map((line) => Object.keys(line).sort()), done.map(() => ['progress', 'repository', 'warnings']));
+  const byName = (entries: { name: string }[]) => [...entries].sort((a, b) => a.name.localeCompare(b.name));
+  assert.deepEqual(byName(done.map((line) => line.repository)), byName(result.repositories));
+  assert.deepEqual(done.flatMap((line) => line.warnings).sort(), [...result.warnings].sort());
   // One repository: only its answer.
   const repository = await streamed('https://github.com/JetBrains/example');
   assert.deepEqual(repository.lines, [{ result: (await scan('https://github.com/JetBrains/example')).body }]);
@@ -1637,7 +1655,7 @@ test('page: an organisation scanning → a progress bar, N of M repositories sca
     assert.equal(view.$('progress').hidden, false);
     const bar = view.$('progress-bar') as HTMLProgressElement;
     assert.deepEqual([bar.value, bar.max], [2, 7]);
-    assert.equal((view.$('scan') as HTMLButtonElement).disabled, true);
+    assert.equal(view.$('scan').textContent, 'Stop');
     stopped.finish();
     await view.settled(1);
     assert.equal(view.$('progress').hidden, true);
@@ -1708,6 +1726,250 @@ test('page: another link entered while an organisation is scanned → its progre
 });
 
 /**
+ * A server whose scans hold, as on a slow network, until `release`: an organisation's, one
+ * repository at a time, once `scanned` of them are done; a link's, before it is opened. A held
+ * request is aborted with its scan's signal. `signals` has each scan's signal, `urls` each request
+ * of an organisation's scan to GitHub.
+ */
+async function heldServer(scanned: number) {
+  let held = true;
+  let holding = 0;
+  const signals: AbortSignal[] = [];
+  const urls: string[] = [];
+  const hold = (signal?: AbortSignal) =>
+    held
+      ? new Promise<never>((_, reject) => {
+          holding++;
+          signal?.addEventListener('abort', () => reject(signal.reason));
+        })
+      : Promise.resolve();
+  const options: WebOptions = {
+    async open(input, signal) {
+      signals.push(signal!);
+      await hold(signal);
+      // Through the tree, as the organisation's repositories are recorded: no code search.
+      return parseGitHubUrl(input) ? openGitHub(input, { fetch: github }) : open(input);
+    },
+    scanOrganisation(input, progress, refresh, signal) {
+      signals.push(signal!);
+      let done = 0;
+      const fetch: Fetch = async (url, init) => {
+        urls.push(url);
+        if (done >= scanned) await hold(init?.signal);
+        return github(url, init);
+      };
+      return scanOwner(input, {
+        fetch,
+        token: 'test',
+        concurrency: 1,
+        signal,
+        progress: (count, total, update) => {
+          done = count;
+          progress?.(count, total, update);
+        },
+      });
+    },
+  };
+  const { server, url } = await serve({ ...options, port: 0 });
+  return {
+    port: new URL(url).port,
+    signals,
+    urls,
+    holding: () => holding,
+    hold: () => (held = true),
+    release: () => (held = false),
+    // Its open requests too: a scan not aborted would keep the test running.
+    close: () => {
+      server.close();
+      server.closeAllConnections();
+    },
+  };
+}
+
+/** Waits for \`done\`; fails after 3 seconds instead of waiting for ever. */
+const until = async (done: () => boolean) => {
+  const deadline = Date.now() + 3_000;
+  while (!done()) {
+    if (Date.now() > deadline) throw new Error('Timed out waiting');
+    await new Promise((r) => setTimeout(r, 10));
+  }
+};
+
+test('page: while an organisation scans, Stop → what has been found so far kept, the rest not scanned; Scan again', { timeout: 5_000 }, async () => {
+  const held = await heldServer(3);
+  const view = await page('/', held.port);
+  const button = view.$('scan') as HTMLButtonElement;
+  const repositories = () =>
+    ([...view.$('repositories').children] as HTMLElement[]).map((item) => `${view.text(item, '.name')} ${view.text(item, '.count')}`);
+  try {
+    assert.deepEqual([button.textContent, button.type], ['Scan', 'submit']);
+    (view.$('repo') as HTMLInputElement).value = 'github.com/skillatlas';
+    view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+    // Done one at a time, in the order listed: example-tools, Docs and alpha, then held.
+    await until(() => view.$('progress-text').textContent === '3 of 7 repositories scanned');
+    // Stop, enabled; not the form's submit button, so Enter in the field still scans a link.
+    assert.deepEqual([button.textContent, button.type, button.disabled], ['Stop', 'button', false]);
+    button.click();
+    assert.deepEqual([button.textContent, button.type, button.disabled], ['Scan', 'submit', false]);
+    assert.equal(view.$('progress').hidden, true);
+    assert.equal(view.$('error').textContent, '');
+    assert.equal(view.$('organisation').hidden, false);
+    assert.equal(view.$('main').hidden, true);
+    assert.equal(view.$('org-summary').textContent, 'SkillAtlas · 7 repositories · 4 skills');
+    // Docs, scanned with 0 skills, is not listed; counted in the header all the same.
+    assert.deepEqual(repositories(), [
+      'alpha 2 skills',
+      'example-tools 2 skills',
+      'Beta not scanned',
+      'broken not scanned',
+      'empty not scanned',
+      'huge not scanned',
+    ]);
+    assert.deepEqual([...view.$('warnings').children].map((item) => item.textContent), [
+      'example-tools: .agents/skills/release/SKILL.md: malformed front matter: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 15; using the directory name',
+    ]);
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas' });
+    assert.deepEqual([tabNames(view), activeTab(view)], [['SkillAtlas'], 'SkillAtlas']);
+    // The server stops the scan: its request aborted, no repository started after it.
+    await until(() => held.signals[0].aborted);
+    const requested = held.urls.length;
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(held.urls.length, requested);
+    assert.equal(held.urls.some((url) => /SkillAtlas\/(Beta|broken|empty)\b/.test(url)), false);
+    // A repository not scanned, selected: scanned now, its skills shown.
+    held.release();
+    ([...view.$('repositories').children] as HTMLElement[])[2].dispatchEvent(new view.dom.window.Event('click'));
+    await view.settled(2);
+    assert.equal(view.$('error').textContent, '');
+    assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    // The stopped organisation's warnings kept, found by their place: Beta, not scanned, had none.
+    assert.deepEqual([...view.$('warnings').children].map((item) => item.textContent), [
+      'example-tools: .agents/skills/release/SKILL.md: malformed front matter: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 15; using the directory name',
+    ]);
+    // Scan again: the whole organisation.
+    await view.enter('github.com/skillatlas');
+    assert.equal(view.$('org-summary').textContent, 'SkillAtlas · 7 repositories · 6 skills');
+    assert.equal(repositories().filter((line) => line.endsWith('not scanned')).length, 1);
+    assert.deepEqual([button.textContent, button.type], ['Scan', 'submit']);
+    assert.equal(view.$('progress').hidden, true);
+  } finally {
+    view.close();
+    held.close();
+  }
+});
+
+test('page: Stop before an organisation\'s repositories are listed, or on a repository link → nothing shown, no error', { timeout: 5_000 }, async () => {
+  const held = await heldServer(0);
+  const view = await page('/', held.port);
+  const button = view.$('scan') as HTMLButtonElement;
+  try {
+    // A scan before, with warnings: Stop leaves none of them.
+    held.release();
+    await view.enter(FIXTURE);
+    assert.equal(view.$('problems').hidden, false);
+    assert.ok(view.$('warnings').children.length > 0);
+    held.hold();
+    for (const [index, link] of ['github.com/skillatlas', FIXTURE].entries()) {
+      (view.$('repo') as HTMLInputElement).value = link;
+      view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+      await until(() => held.holding() === index + 1);
+      assert.equal(button.textContent, 'Stop');
+      button.click();
+      assert.equal(button.textContent, 'Scan');
+      assert.equal(view.$('organisation').hidden, true);
+      assert.equal(view.$('main').hidden, true);
+      assert.equal(view.$('progress').hidden, true);
+      assert.equal(view.$('error').textContent, '');
+      assert.equal(view.$('problems').hidden, true);
+      assert.equal(view.$('warnings').children.length, 0);
+      assert.deepEqual(view.search(), { repo: link });
+      await until(() => held.signals[index + 1].aborted);
+    }
+    // Scan again: its skills.
+    held.release();
+    await view.enter(FIXTURE);
+    assert.match(view.$('summary').textContent!, / · 4 skills$/);
+    assert.equal(button.textContent, 'Scan');
+  } finally {
+    view.close();
+    held.close();
+  }
+});
+
+test('page: another link entered while an organisation scans → the earlier scan aborted, it shows nothing more', { timeout: 5_000 }, async () => {
+  const held = await heldServer(3);
+  const view = await page('/', held.port);
+  const button = view.$('scan') as HTMLButtonElement;
+  try {
+    (view.$('repo') as HTMLInputElement).value = 'github.com/skillatlas';
+    view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+    await until(() => view.$('progress-text').textContent === '3 of 7 repositories scanned');
+    assert.equal(held.signals[0].aborted, false);
+    // Enter in the field, Stop showing: the link entered is scanned, the earlier one aborted.
+    held.release();
+    await view.enter(FIXTURE);
+    assert.match(view.$('summary').textContent!, / · 4 skills$/);
+    assert.deepEqual([button.textContent, button.type], ['Scan', 'submit']);
+    assert.equal(view.$('progress').hidden, true);
+    assert.equal(view.$('organisation').hidden, true);
+    assert.equal(view.$('error').textContent, '');
+    assert.equal(view.search().repo, FIXTURE);
+    // The server stops the earlier scan: its signal aborted, no request to GitHub after it.
+    await until(() => held.signals[0].aborted);
+    const requested = held.urls.length;
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(held.urls.length, requested);
+    assert.equal(held.urls.some((url) => /SkillAtlas\/(Beta|broken|empty)\b/.test(url)), false);
+    assert.equal(view.$('organisation').hidden, true);
+    assert.match(view.$('summary').textContent!, / · 4 skills$/);
+  } finally {
+    view.close();
+    held.close();
+  }
+});
+
+test('page: Stop while a repository of the organisation is scanned → the organisation stays, no repository selected', { timeout: 5_000 }, async () => {
+  const held = await heldServer(7);
+  held.release();
+  const view = await page('/', held.port);
+  const button = view.$('scan') as HTMLButtonElement;
+  try {
+    await view.enter('github.com/skillatlas');
+    const items = () => [...view.$('repositories').children] as HTMLElement[];
+    items()[0].dispatchEvent(new view.dom.window.Event('click'));
+    await view.settled(2);
+    assert.equal(view.$('main').hidden, false);
+    held.hold();
+    items()[1].dispatchEvent(new view.dom.window.Event('click'));
+    await until(() => held.holding() === 1);
+    assert.equal(button.textContent, 'Stop');
+    button.click();
+    assert.equal(button.textContent, 'Scan');
+    assert.equal(view.$('organisation').hidden, false);
+    assert.equal(view.$('org-summary').textContent, 'SkillAtlas · 7 repositories · 6 skills');
+    assert.deepEqual(items().map((item) => item.getAttribute('aria-selected')), items().map(() => 'false'));
+    // Its tab closed, the organisation's active.
+    assert.deepEqual([tabNames(view), activeTab(view)], [['SkillAtlas'], 'SkillAtlas']);
+    assert.equal(view.$('loading').hidden, true);
+    assert.equal(view.$('main').hidden, true);
+    assert.equal(view.$('error').textContent, '');
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas' });
+    await until(() => held.signals.at(-1)!.aborted);
+    // Selected again: scanned again, its skills.
+    held.release();
+    const scans = view.scans();
+    items()[1].dispatchEvent(new view.dom.window.Event('click'));
+    await view.settled(scans + 1);
+    assert.equal(activeTab(view), 'Beta');
+    assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    assert.equal(view.$('error').textContent, '');
+  } finally {
+    view.close();
+    held.close();
+  }
+});
+
+/**
  * A server whose scan of a repository whose link contains `stalled` waits until `release`; the
  * others as on the server above. `reached` once such a scan started.
  */
@@ -1736,7 +1998,7 @@ const button = (view: Awaited<ReturnType<typeof page>>) => {
   return [scan.textContent, !scan.disabled];
 };
 
-test('page: the Scan button → Scanning…, disabled, while a scan runs; Scan, enabled, once it succeeds', { timeout: 5_000 }, async () => {
+test('page: the Scan button → Stop, enabled, while a scan runs; Scan, enabled, once it succeeds', { timeout: 5_000 }, async () => {
   const stalled = await stalledServer('JetBrains/example');
   const view = await page('/', stalled.port);
   try {
@@ -1744,7 +2006,7 @@ test('page: the Scan button → Scanning…, disabled, while a scan runs; Scan, 
     (view.$('repo') as HTMLInputElement).value = 'https://github.com/JetBrains/example';
     view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
     await stalled.started;
-    assert.deepEqual(button(view), ['Scanning…', false]);
+    assert.deepEqual(button(view), ['Stop', true]);
     stalled.release();
     await view.settled(1);
     assert.equal(view.$('summary').textContent, `JetBrains/example · 1 skill · ${EXAMPLE_COMMIT.slice(0, 12)}`);
@@ -1770,7 +2032,7 @@ test('page: the Scan button → Scan, enabled, once a scan fails, before or afte
     (failing.$('repo') as HTMLInputElement).value = 'github.com/skillatlas';
     failing.$('form').dispatchEvent(new failing.dom.window.Event('submit', { cancelable: true }));
     await stopped.stopped;
-    assert.deepEqual(button(failing), ['Scanning…', false]);
+    assert.deepEqual(button(failing), ['Stop', true]);
     stopped.fail(new AtlasError('Cannot reach GitHub: connection reset'));
     await failing.settled(1);
     assert.equal(failing.$('error').textContent, 'Cannot reach GitHub: connection reset');
@@ -1823,7 +2085,7 @@ test('page: the Scan button → Scan, enabled, once the repository last opened f
     // alpha never answers; Beta, opened after it, does.
     repositories[0].dispatchEvent(new view.dom.window.Event('click'));
     await stalled.started;
-    assert.deepEqual(button(view), ['Scanning…', false]);
+    assert.deepEqual(button(view), ['Stop', true]);
     repositories[1].dispatchEvent(new view.dom.window.Event('click'));
     await view.settled(scans + 2);
     assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
@@ -1862,7 +2124,7 @@ test('page: a repository of the organisation clicked while another link is scann
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(view.scans(), scans);
     assert.equal(view.$('error').textContent, '');
-    assert.deepEqual(button(view), ['Scanning…', false]);
+    assert.deepEqual(button(view), ['Stop', true]);
     stalled.release();
     await view.settled(scans);
     assert.equal(view.$('organisation').hidden, true);
