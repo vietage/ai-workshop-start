@@ -77,9 +77,12 @@
     one's too, and those not listed), each as `<name>: <warning>`; else the repository's; none →
     no area
   - In a repository's tab, once its scan is done → its lines are its own scan's warnings,
-    `<name>: <warning>`, where its lines were (at the end if it had none); a `not scanned` line for
-    it is gone; in the organisation's tab, while the repository's scan is under way (the filter
-    used meanwhile too), or it fails → the organisation's as they were
+    `<name>: <warning>`, where its lines were (where they would be in the repositories' order,
+    before the cache's, if it had none); a `not scanned` line for it is gone; in the organisation's
+    tab, while the repository's scan is under way (the filter used meanwhile too), or it fails →
+    the organisation's as they were
+  - Its lines found by their place, from each repository's `warnings` (API), not by their text: a
+    repository named `cache` selected → its lines replaced, the cache's own `cache: …` stay
   - A *limited height*: the list grows to at most 160px, and scrolls when it doesn't fit; the
     area never grows past its title and that list; Tab reaches the list, so the keyboard scrolls it
 - A failed scan → its message, nothing else
@@ -116,7 +119,9 @@ and `content`, the SKILL.md text), `total` (the count before the filter), `warni
     `{ "error": "Not a valid request" }`, not Node's empty 400; the server keeps running
 - Each file is read once: the page shows the text the scan parsed
 - An organisation → JSON: `organisation` (`name`, `url`), `repositories` (each with `name`, `url`,
-  `commit`, `skillCount`; `null` for one that failed), `skills` (their sum), `warnings`
+  `commit`, `skillCount`; `null` for one that failed; `warnings`, its own, without `<name>: `:
+  `not scanned: …` for one that failed), `skills` (their sum), `warnings`: each repository's,
+  `<name>: <warning>`, in the order of `repositories`, then the cache's
   - *Every* repository, those with 0 skills too: the page leaves them out
   - With `filter` → status 400; unknown organisation → status 400
   - The same JSON, and the same `stream=1` lines, with a cold or a warm *cache*; a repository
@@ -127,8 +132,9 @@ and `content`, the SKILL.md text), `total` (the count before the filter), `warni
   as an organisation's repositories are done (0 of N first), then `{ "result": <the JSON above> }`;
   one repository: only the `result`
   - 0 of N also has `organisation` and `repositories`, every one listed, its `commit` and
-    `skillCount` `null`; each line after it, the repository just done, `repository` as in the
-    result, and its `warnings`: what has been found so far
+    `skillCount` `null`, its `warnings` empty; each line after it, the repository just done,
+    `repository` as in the result (its own `warnings` too), and its `warnings`, `<name>: <warning>`:
+    what has been found so far
   - A scan that fails *before* any line → status 400, `{ "error": <message> }`, as without it;
     *after* → status 200, its last line `{ "error": <message> }`
 - The request aborted by the page (Stop, another link entered, the page closed) → the scan stops:

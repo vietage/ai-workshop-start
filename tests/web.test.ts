@@ -825,6 +825,7 @@ test('API: an organisation → its repositories, each with its commit and skill 
     url: 'https://github.com/SkillAtlas/alpha',
     commit: ORGANISATION_COMMIT,
     skillCount: 2,
+    warnings: [],
   });
   // Every repository, those with 0 skills too (the CLI and the page leave them out): the same
   // order, counts and warnings as the CLI; a repository that failed: no commit, no count.
@@ -839,9 +840,24 @@ test('API: an organisation → its repositories, each with its commit and skill 
       `${repository.name} — ${repository.skillCount === null ? 'not scanned' : `${repository.skillCount} skill${repository.skillCount === 1 ? '' : 's'}`}`),
     cli.stdout.split('\n').slice(1),
   );
-  assert.deepEqual(body.repositories.at(-1), { name: 'broken', url: 'https://github.com/SkillAtlas/broken', commit: null, skillCount: null });
+  assert.deepEqual(body.repositories.at(-1), {
+    name: 'broken',
+    url: 'https://github.com/SkillAtlas/broken',
+    commit: null,
+    skillCount: null,
+    warnings: ['not scanned: GitHub rate limit reached; try again in a minute'],
+  });
   assert.equal(body.skills, 6);
   assert.deepEqual(body.warnings.map((warning: string) => `warning: ${warning}`), cli.stderr.split('\n'));
+  // Each repository's own warnings, without its name: the warnings are theirs, in the same order.
+  assert.deepEqual(
+    body.repositories.find((repository: { name: string }) => repository.name === 'example-tools').warnings,
+    [cli.stderr.split('\n')[0].slice('warning: example-tools: '.length)],
+  );
+  assert.deepEqual(
+    body.warnings,
+    body.repositories.flatMap((repository: { name: string; warnings: string[] }) => repository.warnings.map((warning) => `${repository.name}: ${warning}`)),
+  );
 });
 
 test('API: an unknown organisation, or a filter on one → 400 and its message', async () => {
@@ -1077,7 +1093,8 @@ test('page: a repository the organisation could not scan, scanned in its tab →
       const result = await scanOrganisation(input, progress);
       return {
         ...result,
-        repositories: result.repositories.map((entry) => (entry.name === 'example-tools' ? { ...entry, skillCount: undefined } : entry)),
+        repositories: result.repositories.map((entry) =>
+          (entry.name === 'example-tools' ? { ...entry, skillCount: undefined, warnings: [notScanned.slice('example-tools: '.length)] } : entry)),
         warnings: result.warnings.map((warning) => (warning.startsWith('example-tools: ') ? notScanned : warning)),
       };
     },
@@ -1115,6 +1132,69 @@ test('page: a repository the organisation could not scan, scanned in its tab →
     view.close();
     stand.server.closeAllConnections();
     stand.server.close();
+  }
+});
+
+test('page: a repository named `cache` selected → its own lines replaced, the cache\'s `cache: …` stay; one with no lines → its own scan\'s where they would be, before the cache\'s', { timeout: 10_000 }, async () => {
+  const cacheWarning = 'cache: not used: /no/such/cache.db is a directory';
+  const notScanned = 'not scanned: GitHub rate limit reached; try again in a minute';
+  // The organisation's scan, with its cache's warning last; example-tools (a malformed SKILL.md),
+  // shown as `name`, with `warnings` as the organisation's scan gave it.
+  const standIn = (name: string, warnings: string[]) => serve({
+    open,
+    port: 0,
+    async scanOrganisation(input, progress) {
+      const result = await scanOrganisation(input, progress);
+      const repositories = result.repositories.map((entry) => (entry.name === 'example-tools' ? { ...entry, name, warnings } : entry));
+      return {
+        ...result,
+        repositories,
+        warnings: [
+          ...repositories.flatMap((entry) => entry.warnings.map((warning) => `${entry.name}: ${warning}`)),
+          cacheWarning,
+        ],
+      };
+    },
+  });
+  const real = await page('/');
+  let expected: string[];
+  try {
+    await real.enter('github.com/skillatlas');
+    expected = [...real.$('warnings').children].map((item) => item.textContent!);
+    assert.match(expected[0], /^example-tools: .*malformed front matter/);
+  } finally {
+    real.close();
+  }
+  const own = expected[0].slice('example-tools: '.length);
+  const cases = [
+    // Named `cache`, not scanned by the organisation: its line replaced by its own scan's; the cache's stays.
+    { name: 'cache', warnings: [notScanned], before: [`cache: ${notScanned}`, ...expected.slice(1), cacheWarning], after: [`cache: ${own}`, ...expected.slice(1), cacheWarning] },
+    // No line in the organisation's scan: its own scan's where they would be, before the cache's.
+    { name: 'example-tools', warnings: [], before: [...expected.slice(1), cacheWarning], after: [...expected, cacheWarning] },
+  ];
+  for (const { name, warnings: given, before, after } of cases) {
+    const stand = await standIn(name, given);
+    const view = await page('/', new URL(stand.url).port);
+    try {
+      await view.enter('github.com/skillatlas');
+      const warnings = () => [...view.$('warnings').children].map((item) => item.textContent);
+      assert.deepEqual(warnings(), before, name);
+      const scans = view.scans();
+      const item = [...view.$('repositories').children].find((entry) => (entry as HTMLElement).dataset.name === name) as HTMLElement;
+      item.dispatchEvent(new view.dom.window.Event('click'));
+      await view.settled(scans + 1);
+      assert.equal(activeTab(view), name);
+      assert.deepEqual(view.names(), ['release', 'review']);
+      assert.deepEqual(warnings(), after, name);
+      assert.equal(view.$('problems-title').textContent, `${after.length} warnings`);
+      // The organisation's tab: its warnings as its scan gave them, the cache's too.
+      clickTab(view, 'SkillAtlas');
+      assert.deepEqual(warnings(), before, name);
+    } finally {
+      view.close();
+      stand.server.closeAllConnections();
+      stand.server.close();
+    }
   }
 });
 
@@ -1445,7 +1525,7 @@ test('page: every repository with 0 skills → none listed, the header counts th
   // Every repository with 0 skills: none listed, no error.
   const quiet = {
     organisation: { name: 'quiet', url: 'https://github.com/quiet' },
-    repositories: ['a', 'b'].map((name) => ({ name, url: `https://github.com/quiet/${name}`, commit: ORGANISATION_COMMIT, skillCount: 0 })),
+    repositories: ['a', 'b'].map((name) => ({ name, url: `https://github.com/quiet/${name}`, commit: ORGANISATION_COMMIT, skillCount: 0, warnings: [] })),
     skills: 0,
     warnings: [],
   };
@@ -1521,7 +1601,7 @@ test('API: stream=1, an organisation → a line per repository done, 0 of N firs
   const { body: result } = await scan('github.com/skillatlas');
   assert.deepEqual(lines.at(-1), { result });
   // 0 of N: the organisation and every repository listed, none scanned yet.
-  const notScanned = (name: string) => ({ name, url: `https://github.com/SkillAtlas/${name}`, commit: null, skillCount: null });
+  const notScanned = (name: string) => ({ name, url: `https://github.com/SkillAtlas/${name}`, commit: null, skillCount: null, warnings: [] });
   assert.deepEqual(lines[0], {
     progress: { scanned: 0, total: 7 },
     organisation: result.organisation,
@@ -1762,6 +1842,10 @@ test('page: while an organisation scans, Stop → what has been found so far kep
     await view.settled(2);
     assert.equal(view.$('error').textContent, '');
     assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    // The stopped organisation's warnings kept, found by their place: Beta, not scanned, had none.
+    assert.deepEqual([...view.$('warnings').children].map((item) => item.textContent), [
+      'example-tools: .agents/skills/release/SKILL.md: malformed front matter: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 15; using the directory name',
+    ]);
     // Scan again: the whole organisation.
     await view.enter('github.com/skillatlas');
     assert.equal(view.$('org-summary').textContent, 'SkillAtlas · 7 repositories · 6 skills');

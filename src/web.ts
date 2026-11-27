@@ -47,7 +47,10 @@ export async function scanJson(input: string, { open, scanOrganisation }: WebOpt
   return { repository: result.repository, skills, total: result.total, warnings: result.warnings };
 }
 
-/** An organisation: its repositories, each with its commit and its skill count; null for the ones that failed. */
+/**
+ * An organisation: its repositories, each with its commit and its skill count, null for the ones
+ * that failed, and its own warnings, without its name.
+ */
 function organisationJson({ organisation, repositories, skills, warnings }: OrganisationResult) {
   return {
     organisation,
@@ -57,9 +60,12 @@ function organisationJson({ organisation, repositories, skills, warnings }: Orga
   };
 }
 
-/** One repository of an organisation: `null` for its commit and count until it is scanned, or when it failed. */
-function repositoryJson({ name, url, commit, skillCount }: OrganisationRepository) {
-  return { name, url, commit: commit ?? null, skillCount: skillCount ?? null };
+/**
+ * One repository of an organisation: `null` for its commit and count until it is scanned, or when
+ * it failed; its own warnings, without its name.
+ */
+function repositoryJson({ name, url, commit, skillCount, warnings }: OrganisationRepository) {
+  return { name, url, commit: commit ?? null, skillCount: skillCount ?? null, warnings };
 }
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);

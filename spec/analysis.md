@@ -51,10 +51,12 @@ Skill: id = `repo:path`, name, description, commit, copies
   - The CLI exits once its output is written, even when a connection given up on stays open
 ## Organisation
 `github.com/<org>`: every repository of an organisation, or of a user, each with its **skill count**
-- **Output**: the organisation, its **repositories** (each with its name, commit, skill count),
-  the count of all their skills, warnings
+- **Output**: the organisation, its **repositories** (each with its name, commit, skill count,
+  its own warnings), the count of all their skills, warnings
 - Each repository on its *default branch*, by the same rules as one repository; its warnings start
-  with `<repo>: `
+  with `<repo>: `, in the order of the repositories; then the cache's, `cache: …`
+  - Whose a warning is: by its place, from each repository's own warnings, not by its text: a
+    repository named `cache` has lines that start like the cache's
   - Always through its *tree*, even with `GITHUB_TOKEN`: code search allows too few requests a
     minute for every repository; a tree too large → only the agent folders at the root, and a warning
 - Sorted by skill count, the most first, then by **name**, *case-insensitive*
