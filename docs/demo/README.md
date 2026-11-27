@@ -20,6 +20,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [scan-button.mp4](scan-button.mp4) | [scan-button.json](scan-button.json) | the Scan button back to `Scan` once the latest scan ends, [#34](https://github.com/vietage/ai-workshop-start/issues/34) |
 | [github-no-answer.mp4](github-no-answer.mp4) | [github-no-answer.json](github-no-answer.json) | a GitHub that never answers: the scan gives up with a clear message, in the web view and the CLI, [#44](https://github.com/vietage/ai-workshop-start/issues/44) |
 | [long-link.mp4](long-link.mp4) | [long-link.json](long-link.json) | a link over 16 KB: its scan's message, on reload too, and the API's 400 JSON, [#46](https://github.com/vietage/ai-workshop-start/issues/46) |
+| [warnings-area.mp4](warnings-area.mp4) | [warnings-area.json](warnings-area.json) | a scan's warnings in their own area of limited height, with a scrollbar, [#36](https://github.com/vietage/ai-workshop-start/issues/36) |
 | [keyboard-lists.mp4](keyboard-lists.mp4) | [keyboard-lists.json](keyboard-lists.json) | the skills and an organisation's repositories from the keyboard, [#47](https://github.com/vietage/ai-workshop-start/issues/47) |
 | [stop-scan.mp4](stop-scan.mp4) | [stop-scan.json](stop-scan.json) | Stop a running scan, keeping what has been found so far, [#38](https://github.com/vietage/ai-workshop-start/issues/38) |
 
@@ -133,6 +134,18 @@ not exist:
 
 A scan that never ends (the case of [#34](https://github.com/vietage/ai-workshop-start/issues/34))
 cannot be recorded against GitHub; `tests/web.test.ts` stalls one in a stand-in server.
+
+## warnings-area
+
+The web view on `./fixture`, then the `JetBrains` organisation, on its default branches (549
+repositories, 50 warnings):
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `./fixture`, Scan | `2 warnings` in a card above the skills | their own area, apart from the skills |
+| `github.com/JetBrains`, Scan | `50 warnings`, the area no taller; the repositories above it | a limited height |
+| the list clicked, PageDown, End | the list scrolls to its last warning | scrolled when it doesn't fit |
+| `intellij-community` selected | its skills under the same area, still 50 warnings | the organisation's warnings stay |
 
 ## github-no-answer
 

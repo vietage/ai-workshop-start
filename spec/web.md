@@ -34,16 +34,17 @@
 - The skills and an organisation's repositories: lists to select from (`role="listbox"`, each
   `role="option"`, `aria-selected`), with the **keyboard** as with the mouse
   - Tab reaches each list once, on its selected item, else its first; the field, *Scan*, the
-    filter, the skills, the SKILL.md link; in an organisation, after *Scan*, the repository's tab's
-    `×` if open, then the organisation's tab's repositories, on the one marked, else its first,
-    or the repository's tab's filter, skills and link
+    warnings' list if shown, the filter, the skills, the SKILL.md link; in an organisation, after
+    *Scan*, the repository's tab's `×` if open, then the organisation's tab's repositories, on the
+    one marked, else its first, then the warnings' list if shown, or the repository's tab's
+    warnings' list if shown, filter, skills and link
   - ArrowDown, ArrowUp, Home, End move the focus through the list, a visible outline on the item;
     the selection stays until Enter or Space selects the item, as a click; the focus leaving the
     list → Tab comes back to it on the selected item, not the one the arrows left it on
   - ArrowDown in the filter → the focus on the skills, on the selected one
 - An **organisation** link, `github.com/<org>`: above the skills, `<org> · N repositories · M skills`,
   its **repositories** in a *column*, one a line, each with its count *next to its name* (`N skills`,
-  or `not scanned`), in the CLI's order, and its warnings; no skills until one is selected
+  or `not scanned`), in the CLI's order; no skills until one is selected
   - Repositories scanned with **0 skills** (an empty one too) → *not listed*; `not scanned` ones
     stay; the header's `N repositories` still counts *all* of them, as the CLI's; their warnings stay
   - Every one with 0 skills → no repositories, `<org> · N repositories · 0 skills`; no error
@@ -58,8 +59,8 @@
       commit counted, and the filter; that repository marked in the list
     - Each repository opened keeps its own selected skill and filter, and its skills: selected
       again → as it was left, not scanned again; one opened for the first time: no filter
-    - While it scans: `Scanning <repo>…`, nothing else; its answer is kept, shown only if it is
-      still the active tab's
+    - While it scans: `Scanning <repo>…`, nothing else but the organisation's warnings; its answer
+      is kept, shown only if it is still the active tab's
     - Switching tabs scans nothing again: the organisation's tab shows its repositories as scanned
     - `×` → the repository's tab closed, the organisation's active, nothing scanned, nothing
       forgotten; the organisation's tab cannot be closed
@@ -67,10 +68,21 @@
       has no tabs
   - A repository not listed, in the URL (`repository=<name>`) → the organisation's tab, none
     selected; no error
-  - It fails → its message in the repository's tab; the organisation's tab stays; selected again
-    → scanned again
+  - It fails → its message in the repository's tab; the organisation's tab stays, and its
+    warnings; selected again → scanned again
   - Unknown organisation → its message, nothing else
-- Warnings, under the skills; a failed scan → its message, nothing else
+- The **errors and warnings** of a scan in their *own area*, apart from the repositories and
+  skills: under the tabs and the organisation, above the skills; `N warnings`, then one a line
+  - An organisation's: while it is shown, in its tab or a repository's, its repositories' (a failed
+    one's too, and those not listed), each as `<name>: <warning>`; else the repository's; none →
+    no area
+  - In a repository's tab, once its scan is done → its lines are its own scan's warnings,
+    `<name>: <warning>`, where its lines were (at the end if it had none); a `not scanned` line for
+    it is gone; in the organisation's tab, while the repository's scan is under way (the filter
+    used meanwhile too), or it fails → the organisation's as they were
+  - A *limited height*: the list grows to at most 160px, and scrolls when it doesn't fit; the
+    area never grows past its title and that list; Tab reaches the list, so the keyboard scrolls it
+- A failed scan → its message, nothing else
   - GitHub that does not answer → after the time limit (`spec/analysis.md`, *Details*), its
     message, `Cannot reach GitHub: no answer in 30 s for <url>`; the button back to `Scan`
   - An answer that is not the API's JSON → `The server answered <status>`, not a parser's error
@@ -88,7 +100,7 @@
 ## Style
 A modern **gradient** style, light and dark as the system's colours:
 - The header on a violet-to-pink gradient; the page on a soft gradient
-- The organisation, the skills and the SKILL.md on rounded *cards*
+- The organisation, the errors and warnings, the skills and the SKILL.md on rounded *cards*
 - A selected skill or repository: a gradient tint and an accent bar; the skill's name in the
   gradient; a repository's count in a pill
 - The tabs on rounded cards; the active tab: a gradient tint and an accent bar

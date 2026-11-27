@@ -36,7 +36,8 @@ the cache, and a missing or broken one never fails a scan. One repository's scan
 Or in a browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
 for the repository or organisation link (an organisation's repositories in a column, each with its
 skill count; a repository selected opens its skills in a tab of its own in the page, next to the
-organisation's tab), its skills (with a field to filter them) and each one's SKILL.md, in a gradient style,
+organisation's tab), the scan's warnings in an area of limited height that scrolls, its skills (with a
+field to filter them) and each one's SKILL.md, in a gradient style,
 light or dark as the system's colours (`--port <port>` for another port). While a scan runs, the
 *Scan* button is **Stop**: it stops the scan, on the server too, and keeps what has been found so far,
 an organisation's repositories already scanned with their counts, the rest `not scanned`.

@@ -42,7 +42,7 @@ export const PAGE = `<!doctype html>
   #progress { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 13px; color: #ffffffd9; }
   #progress-bar { flex: 1; max-width: 420px; height: 8px; accent-color: white; }
   main { display: grid; grid-template-columns: minmax(260px, 380px) 1fr; gap: 16px; padding: 16px 24px 24px; min-height: calc(100vh - 110px); }
-  #list, #skill, #organisation { background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+  #list, #skill, #organisation, #problems { background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
   #list { overflow: auto; align-self: start; }
   #summary { padding: 14px 16px 10px; color: var(--muted); }
   #summary strong { color: var(--text); }
@@ -58,8 +58,6 @@ export const PAGE = `<!doctype html>
   .name { font-weight: 600; }
   .description { font-size: 13px; }
   .path, .copies { font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; word-break: break-all; }
-  #warnings { margin: 0; padding: 12px 16px 12px 32px; font-size: 13px; color: var(--warning); border-top: 1px solid var(--border); }
-  #warnings:empty { display: none; }
   #organisation { margin: 16px 24px 0; padding: 14px 16px; }
   /* An organisation's tabs: its own, then the repository's, with a close button. */
   #tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 24px 0; }
@@ -77,8 +75,10 @@ export const PAGE = `<!doctype html>
   #repositories li:hover { background: #8b5cf60f; }
   #repositories li[aria-selected="true"] { background: var(--selected); box-shadow: inset 3px 0 var(--accent); }
   #repositories .count { padding: 0 8px; border-radius: 999px; font-size: 12px; color: var(--muted); background: #8b5cf61a; white-space: nowrap; }
-  #org-warnings { margin: 8px 0 0; padding-left: 16px; font-size: 13px; color: var(--warning); }
-  #org-warnings:empty { display: none; }
+  /* The scan's errors and warnings, apart from the repositories and skills: a limited height, scrolled when they don't fit. */
+  #problems { margin: 16px 24px 0; padding: 10px 16px 12px; }
+  #problems h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--warning); }
+  #warnings { margin: 0; padding: 0 0 0 16px; font-size: 13px; line-height: 20px; color: var(--warning); max-height: 160px; overflow: auto; overscroll-behavior: contain; }
   #error { margin: 16px 24px; padding: 10px 14px; border-radius: 10px; background: #e11d4822; color: #e11d48; white-space: pre-wrap; overflow-wrap: anywhere; }
   #error:empty { display: none; }
   #skill { padding: 18px 24px; overflow: auto; min-width: 0; }
@@ -104,17 +104,19 @@ export const PAGE = `<!doctype html>
 <section id="organisation" hidden>
   <div id="org-summary"></div>
   <ul id="repositories" role="listbox" aria-label="Repositories"></ul>
-  <ul id="org-warnings"></ul>
 </section>
 <p id="loading" class="placeholder" hidden></p>
 <div id="error" role="alert"></div>
+<section id="problems" aria-labelledby="problems-title" hidden>
+  <h2 id="problems-title"></h2>
+  <ul id="warnings" tabindex="0" aria-label="Errors and warnings"></ul>
+</section>
 <main id="main" hidden>
   <section id="list">
     <div id="summary"></div>
     <input id="filter" type="search" placeholder="Filter by name or description" aria-label="Filter skills" autocomplete="off">
     <p id="no-match"></p>
     <ul id="skills" role="listbox" aria-label="Skills"></ul>
-    <ul id="warnings"></ul>
   </section>
   <section id="skill"><p class="placeholder">Select a skill to see its SKILL.md.</p></section>
 </main>
@@ -381,15 +383,43 @@ function failed(error) {
   $('organisation').hidden = !organisation || active !== undefined;
   $('main').hidden = true;
   $('error').textContent = error.message;
+  showWarnings();
+}
+
+/**
+ * The scan's errors and warnings, in their own area: the organisation's while one is shown, in its
+ * tab or a repository's; else the repository's; none after a failed scan of a link.
+ */
+function showWarnings() {
+  const warnings = organisation ? organisationWarnings() : result ? result.warnings : [];
+  $('problems').hidden = !warnings.length;
+  $('problems-title').textContent = plural(warnings.length, 'warning', 'warnings');
+  $('warnings').replaceChildren(...warnings.map((warning) => element('li', '', warning)));
+}
+
+/**
+ * The organisation's warnings, each repository's as \`<name>: <warning>\`. In a repository's tab, once
+ * its own scan is done: its lines are those of that scan, where they were (at the end if it had
+ * none), so that a \`not scanned\` line of the organisation's scan goes; the organisation's as they
+ * were in its own tab, while the repository's scan is under way, or when it failed.
+ */
+function organisationWarnings() {
+  if (!active?.result) return organisation.warnings;
+  const prefix = active.name + ': ';
+  const own = active.result.warnings.map((warning) => prefix + warning);
+  const at = organisation.warnings.findIndex((warning) => warning.startsWith(prefix));
+  const others = organisation.warnings.filter((warning) => !warning.startsWith(prefix));
+  if (at === -1) return [...others, ...own];
+  return [...others.slice(0, at), ...own, ...others.slice(at)];
 }
 
 /**
  * The organisation: all its repositories counted; each one with its skill count, the ones with no
- * skills left out; and its warnings.
+ * skills left out; its warnings apart.
  */
 function showOrganisation() {
   const shown = organisation;
-  const { organisation: owner, repositories, skills, warnings } = shown;
+  const { organisation: owner, repositories, skills } = shown;
   $('organisation').hidden = false;
   $('org-summary').replaceChildren(
     element('strong', '', owner.name),
@@ -407,7 +437,7 @@ function showOrganisation() {
     return item;
   }));
   rove($('repositories'));
-  $('org-warnings').replaceChildren(...warnings.map((warning) => element('li', '', warning)));
+  showWarnings();
 }
 
 /**
@@ -448,6 +478,7 @@ function activate(state) {
   active = state;
   repository = state?.name;
   showTabs();
+  showWarnings();
   $('error').textContent = '';
   $('organisation').hidden = state !== undefined;
   $('loading').hidden = true;
@@ -509,7 +540,7 @@ function showTabs() {
 
 /** The repository, and its skills that match the filter; the skill at \`path\` selected if shown. */
 function show(path) {
-  const { repository, skills: all, warnings } = result;
+  const { repository, skills: all } = result;
   const words = filterWords();
   const skills = words ? all.filter((skill) => matches(skill, words.split(' '))) : all;
   $('main').hidden = false;
@@ -531,7 +562,7 @@ function show(path) {
     return item;
   }));
   $('no-match').textContent = words && !skills.length ? 'no skills match "' + words + '"' : '';
-  $('warnings').replaceChildren(...warnings.map((warning) => element('li', '', warning)));
+  showWarnings();
   const initial = skills.find((skill) => skill.path === path) ?? skills[0];
   select(initial?.path);
 }

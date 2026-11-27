@@ -354,14 +354,18 @@ test('page: a skill selected → its SKILL.md as it is, and its link', { timeout
   }
 });
 
-test('page: warnings, under the skills; a failed scan → its message, nothing else', { timeout: 5_000 }, async () => {
+test('page: warnings in their own area, above the skills; a failed scan → its message, nothing else', { timeout: 5_000 }, async () => {
   const view = await page('/');
   try {
     await view.enter(FIXTURE);
     const cli = await atlas(['scan', FIXTURE]);
     const warnings = [...view.$('warnings').children].map((item) => `warning: ${item.textContent}`);
     assert.deepEqual(warnings, cli.stderr.split('\n'));
-    assert.equal(view.$('skills').nextElementSibling, view.$('warnings'));
+    assert.equal(view.$('problems-title').textContent, '2 warnings');
+    assert.equal(view.shown('problems'), true);
+    // Apart from the skills: not in them, and above them.
+    assert.equal(view.$('main').contains(view.$('problems')), false);
+    assert.equal(view.$('problems').nextElementSibling, view.$('main'));
     assert.equal(view.$('error').textContent, '');
     await view.enter('/no/such/directory');
     assert.equal(view.$('error').textContent, 'Not a GitHub URL or a readable directory: /no/such/directory');
@@ -371,8 +375,79 @@ test('page: warnings, under the skills; a failed scan → its message, nothing e
     assert.equal(view.shown('error'), true);
     assert.equal(view.shown('organisation'), false);
     assert.equal(view.shown('progress'), false);
+    assert.equal(view.shown('problems'), false);
   } finally {
     view.close();
+  }
+});
+
+/** A server whose organisation scan has `count` warnings: the recorded ones, then made-up ones. */
+async function warningServer(count: number) {
+  const { server, url } = await serve({
+    open,
+    port: 0,
+    async scanOrganisation(input, progress) {
+      const result = await scanOrganisation(input, progress);
+      const extra = Array.from({ length: count - result.warnings.length }, (_, index) => `repository-${index}: GitHub rate limit reached; try again in a minute`);
+      return { ...result, warnings: [...result.warnings, ...extra] };
+    },
+  });
+  return { port: new URL(url).port, close: () => server.close() };
+}
+
+/** The warnings' list: at most 160px high, scrolled when its warnings don't fit. */
+function assertLimited(view: Awaited<ReturnType<typeof page>>) {
+  const style = view.dom.window.getComputedStyle(view.$('warnings'));
+  assert.equal(style.maxHeight, '160px');
+  assert.equal(style.overflowY, 'auto');
+  // Only the list scrolls: the area itself and its title don't grow with it.
+  const area = view.dom.window.getComputedStyle(view.$('problems'));
+  assert.equal(area.height, 'auto');
+  assert.equal(area.maxHeight, 'none');
+  assert.equal(view.$('problems').children.length, 2);
+}
+
+test('page: a few warnings → all in the area, which has a limited height', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    assert.equal(view.shown('problems'), true);
+    assert.equal(view.$('problems-title').textContent, '3 warnings');
+    assert.equal(view.$('warnings').children.length, 3);
+    assertLimited(view);
+    // The area is apart from the organisation's repositories, under them.
+    assert.equal(view.$('organisation').contains(view.$('problems')), false);
+    assert.equal(view.$('organisation').compareDocumentPosition(view.$('problems')) & view.dom.window.Node.DOCUMENT_POSITION_FOLLOWING, view.dom.window.Node.DOCUMENT_POSITION_FOLLOWING);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: many warnings → all in the area, which does not grow past its limit and scrolls', { timeout: 5_000 }, async () => {
+  const stand = await warningServer(200);
+  const view = await page('/', stand.port);
+  try {
+    await view.enter('github.com/skillatlas');
+    assert.equal(view.$('problems-title').textContent, '200 warnings');
+    const items = [...view.$('warnings').children];
+    assert.equal(items.length, 200);
+    assert.equal(items.at(-1)!.textContent, 'repository-196: GitHub rate limit reached; try again in a minute');
+    assertLimited(view);
+    // 200 lines of 20px are far past the limit: the list is focusable, to scroll it with the keys.
+    assert.equal(view.dom.window.getComputedStyle(view.$('warnings')).lineHeight, '20px');
+    assert.equal(view.$('warnings').tabIndex, 0);
+    // The repositories and, once one is selected, its skills are still shown, the warnings with them.
+    assert.equal(view.shown('repositories'), true);
+    const scans = view.scans();
+    ([...view.$('repositories').children][0] as HTMLElement).dispatchEvent(new view.dom.window.Event('click'));
+    await view.settled(scans + 1);
+    assert.equal(view.shown('main'), true);
+    assert.deepEqual(view.names(), ['one', 'two']);
+    assert.equal(view.$('warnings').children.length, 200);
+    assertLimited(view);
+  } finally {
+    view.close();
+    stand.close();
   }
 });
 
@@ -796,7 +871,7 @@ test('page: an organisation link → its repositories with their counts; selecti
       [['alpha', '2 skills'], ['Beta', '2 skills'], ['example-tools', '2 skills'], ['broken', 'not scanned']],
     );
     // Their warnings stay: huge's among them.
-    assert.equal(view.$('org-warnings').children.length, 3);
+    assert.equal(view.$('warnings').children.length, 3);
     // No repository selected yet: no skills.
     assert.equal(view.$('main').hidden, true);
     assert.deepEqual(view.search(), { repo: 'github.com/skillatlas' });
@@ -808,6 +883,8 @@ test('page: an organisation link → its repositories with their counts; selecti
     assert.equal(view.$('main').hidden, false);
     assert.equal(view.$('error').textContent, '');
     assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    // The organisation's warnings stay: they include each repository's.
+    assert.equal(view.$('warnings').children.length, 3);
     assert.deepEqual(view.names(), ['four', 'three']);
     assert.equal(view.$('skill').querySelector('h2')!.textContent, 'four');
     // The filter narrows the selected repository's skills, as today.
@@ -846,7 +923,7 @@ test('page: a gradient style: the header, the page, cards, the selected skill an
     assert.match(style(document.querySelector('header')!).backgroundImage, /^linear-gradient\(/);
     assert.match(style(document.body).backgroundImage, /^linear-gradient\(/);
     // Rounded cards: jsdom gives `0px` for an element with no radius.
-    for (const id of ['organisation', 'list', 'skill']) assert.match(style(view.$(id)).borderRadius, /^[1-9]\d*px$/, id);
+    for (const id of ['organisation', 'problems', 'list', 'skill']) assert.match(style(view.$(id)).borderRadius, /^[1-9]\d*px$/, id);
     const selected = view.items().find((item) => item.getAttribute('aria-selected') === 'true')!;
     const other = view.items().find((item) => item.getAttribute('aria-selected') === 'false')!;
     // The selected skill: a gradient tint and an accent bar; the others neither.
@@ -948,6 +1025,8 @@ test('page: a repository of the organisation that fails → its message in the r
     assert.equal(activeTab(view), 'broken');
     assert.equal(view.$('organisation').hidden, true);
     assert.equal(view.$('main').hidden, true);
+    assert.equal(view.shown('problems'), true);
+    assert.equal(view.$('warnings').children.length, 3);
     assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'broken' });
     // The organisation's tab: its repositories, no error; back to the failed one: its message again.
     clickTab(view, 'SkillAtlas');
@@ -967,6 +1046,101 @@ test('page: a repository of the organisation that fails → its message in the r
     assert.equal(view.$('tabs').hidden, true);
     assert.equal(view.$('error').textContent, '');
     assert.deepEqual(view.search(), { repo: 'https://github.com/JetBrains/example', skill: '.claude/skills/commits/SKILL.md' });
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a repository the organisation could not scan, scanned in its tab → its own warnings there, not `not scanned`; the organisation\'s tab as its scan gave them', { timeout: 10_000 }, async () => {
+  // The organisation's scan, then a stand-in where example-tools (a malformed SKILL.md) was not scanned.
+  const real = await page('/');
+  let expected: string[];
+  try {
+    await real.enter('github.com/skillatlas');
+    expected = [...real.$('warnings').children].map((item) => item.textContent!);
+    assert.equal(expected.filter((warning) => warning.startsWith('example-tools: ')).length, 1);
+    assert.match(expected[0], /^example-tools: .*malformed front matter/);
+    // Scanned by the organisation: selected, its warnings are not listed twice.
+    const scans = real.scans();
+    const tools = [...real.$('repositories').children].find((item) => (item as HTMLElement).dataset.name === 'example-tools') as HTMLElement;
+    tools.dispatchEvent(new real.dom.window.Event('click'));
+    await real.settled(scans + 1);
+    assert.deepEqual([...real.$('warnings').children].map((item) => item.textContent), expected);
+  } finally {
+    real.close();
+  }
+  const notScanned = 'example-tools: not scanned: GitHub rate limit reached; try again in a minute';
+  const stand = await serve({
+    open,
+    port: 0,
+    async scanOrganisation(input, progress) {
+      const result = await scanOrganisation(input, progress);
+      return {
+        ...result,
+        repositories: result.repositories.map((entry) => (entry.name === 'example-tools' ? { ...entry, skillCount: undefined } : entry)),
+        warnings: result.warnings.map((warning) => (warning.startsWith('example-tools: ') ? notScanned : warning)),
+      };
+    },
+  });
+  const view = await page('/', new URL(stand.url).port);
+  try {
+    await view.enter('github.com/skillatlas');
+    const warnings = () => [...view.$('warnings').children].map((item) => item.textContent);
+    assert.deepEqual(warnings(), [notScanned, ...expected.slice(1)]);
+    const repositories = () => [...view.$('repositories').children] as HTMLElement[];
+    const click = async (name: string) => {
+      const scans = view.scans();
+      repositories().find((item) => item.dataset.name === name)!.dispatchEvent(new view.dom.window.Event('click'));
+      await view.settled(scans + 1);
+    };
+    await click('example-tools');
+    assert.deepEqual(view.names(), ['release', 'review']);
+    // Its own scan's warning, where its line was; no `not scanned` for it; the others as they were.
+    assert.deepEqual(warnings(), expected);
+    assert.equal(view.$('problems-title').textContent, `${expected.length} warnings`);
+    // The organisation's tab: its warnings as its scan gave them, as its list still says `not scanned`.
+    clickTab(view, 'SkillAtlas');
+    assert.equal(view.shown('problems'), true);
+    assert.deepEqual(warnings(), [notScanned, ...expected.slice(1)]);
+    // Its tab again: its own scan's warnings, not scanned again.
+    const scans = view.scans();
+    clickTab(view, 'example-tools');
+    assert.equal(view.scans(), scans);
+    assert.deepEqual(warnings(), expected);
+    // Another repository selected: the organisation's warnings as its scan gave them.
+    clickTab(view, 'SkillAtlas');
+    await click('alpha');
+    assert.deepEqual(warnings(), [notScanned, ...expected.slice(1)]);
+  } finally {
+    view.close();
+    stand.server.closeAllConnections();
+    stand.server.close();
+  }
+});
+
+test('page: the filter used while another repository of the organisation scans → the organisation\'s warnings as they were', { timeout: 10_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    const warnings = () => [...view.$('warnings').children].map((item) => item.textContent);
+    const expected = warnings();
+    const click = (name: string) => ([...view.$('repositories').children] as HTMLElement[])
+      .find((item) => item.dataset.name === name)!.dispatchEvent(new view.dom.window.Event('click'));
+    let scans = view.scans();
+    click('example-tools');
+    await view.settled(scans + 1);
+    assert.deepEqual(warnings(), expected);
+    // alpha's scan under way: the previous repository's warnings are not shown again under alpha's name.
+    scans = view.scans();
+    click('alpha');
+    // Its tab says `Scanning alpha…`, and the organisation's warnings stay.
+    assert.equal(view.$('loading').textContent, 'Scanning alpha…');
+    assert.equal(view.shown('problems'), true);
+    view.filter('r');
+    assert.deepEqual(warnings(), expected);
+    assert.equal(warnings().filter((warning) => warning!.startsWith('alpha: ')).length, 0);
+    await view.settled(scans + 1);
+    assert.deepEqual(warnings(), expected);
   } finally {
     view.close();
   }
@@ -1301,6 +1475,7 @@ test('page: an unknown organisation → its message, nothing else', { timeout: 5
     assert.equal(view.$('error').textContent, 'Organisation not found: https://github.com/no-such-organisation');
     assert.equal(view.$('organisation').hidden, true);
     assert.equal(view.$('main').hidden, true);
+    assert.equal(view.shown('problems'), false);
   } finally {
     view.close();
   }
@@ -1570,7 +1745,7 @@ test('page: while an organisation scans, Stop → what has been found so far kep
       'empty not scanned',
       'huge not scanned',
     ]);
-    assert.deepEqual([...view.$('org-warnings').children].map((item) => item.textContent), [
+    assert.deepEqual([...view.$('warnings').children].map((item) => item.textContent), [
       'example-tools: .agents/skills/release/SKILL.md: malformed front matter: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 15; using the directory name',
     ]);
     assert.deepEqual(view.search(), { repo: 'github.com/skillatlas' });
@@ -1899,8 +2074,8 @@ test('page: the skills from the keyboard: Tab reaches the selected one, the arro
   try {
     await view.enter(FIXTURE);
     const paths = view.items().map((item) => item.dataset.path!);
-    // The field, Scan, the filter, the skills once, on the selected one, the SKILL.md link.
-    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'filter', paths[0], 'a']);
+    // The field, Scan, the warnings' list, the filter, the skills once, on the selected one, the SKILL.md link.
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'warnings', 'filter', paths[0], 'a']);
     assert.equal(view.$('skills').getAttribute('role'), 'listbox');
     assert.ok(view.items().every((item) => item.getAttribute('role') === 'option'));
 
@@ -1924,7 +2099,7 @@ test('page: the skills from the keyboard: Tab reaches the selected one, the arro
     assert.equal(view.$('skill').querySelector('h2')!.textContent, 'code-style');
     // The focus leaving the list (Shift+Tab, a click elsewhere): Tab comes back on the selected one.
     view.$('filter').focus();
-    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'filter', paths[0], 'a']);
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'warnings', 'filter', paths[0], 'a']);
     press(view, 'ArrowDown');
     press(view, 'ArrowDown');
     assert.equal(focused(view), paths[1]);
@@ -1942,9 +2117,9 @@ test('page: the skills from the keyboard: Tab reaches the selected one, the arro
     assert.equal(view.selected(), paths[2]);
     assert.equal(view.$('skill').querySelector('h2')!.textContent, 'invoices');
     // Tab comes back to the list on the selected skill, also after the filter narrows it.
-    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'filter', paths[2], 'a']);
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'warnings', 'filter', paths[2], 'a']);
     view.filter('commit');
-    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'filter', view.selected(), 'a']);
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'warnings', 'filter', view.selected(), 'a']);
     // Other keys are left to the browser.
     view.items()[0].focus();
     assert.equal(press(view, 'Tab'), false);
@@ -1961,7 +2136,7 @@ test('page: an organisation\'s repositories from the keyboard: Tab reaches them,
     const repositories = () => [...view.$('repositories').children] as HTMLElement[];
     assert.equal(view.$('repositories').getAttribute('role'), 'listbox');
     // None selected yet: Tab reaches the first.
-    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'alpha']);
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'alpha', 'warnings']);
     repositories()[0].focus();
     press(view, 'ArrowDown');
     assert.equal(focused(view), 'Beta');
@@ -1969,7 +2144,7 @@ test('page: an organisation\'s repositories from the keyboard: Tab reaches them,
     assert.equal(view.$('main').hidden, true);
     // The focus leaving the list: Tab comes back on the first, none being selected.
     view.$('scan').focus();
-    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'alpha']);
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'alpha', 'warnings']);
     repositories()[0].focus();
     press(view, 'ArrowDown');
     let scans = view.scans();
@@ -1978,12 +2153,12 @@ test('page: an organisation\'s repositories from the keyboard: Tab reaches them,
     assert.equal(repositories()[1].getAttribute('aria-selected'), 'true');
     assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
     assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'Beta', skill: '.agents/skills/four/SKILL.md' });
-    // In the repository's tab: its close button, then its skills; the list is in the organisation's tab.
+    // In the repository's tab: its close button, the warnings' list, then its skills; the list is in the organisation's tab.
     assert.equal(activeTab(view), 'Beta');
-    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'button', 'filter', '.agents/skills/four/SKILL.md', 'a']);
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'button', 'warnings', 'filter', '.agents/skills/four/SKILL.md', 'a']);
     // Back in the organisation's tab, Tab reaches the list on the repository opened.
     clickTab(view, 'SkillAtlas');
-    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'button', 'Beta']);
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'button', 'Beta', 'warnings']);
     // Space opens one too.
     repositories()[1].focus();
     press(view, 'ArrowUp');
@@ -1994,15 +2169,15 @@ test('page: an organisation\'s repositories from the keyboard: Tab reaches them,
     assert.equal(repositories()[0].getAttribute('aria-selected'), 'true');
     assert.match(view.$('summary').textContent!, /^SkillAtlas\/alpha · 2 skills/);
     clickTab(view, 'SkillAtlas');
-    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'button', 'alpha']);
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'button', 'alpha', 'warnings']);
     // Its tab closed with the keyboard's button: none marked, Tab reaches the first.
     closeTab(view, 'alpha');
-    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'alpha']);
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'alpha', 'warnings']);
     // One opened with the mouse, the focus elsewhere: Tab reaches the list on it too.
     view.$('repo').focus();
     await openRepository(view, 'Beta');
     clickTab(view, 'SkillAtlas');
-    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'button', 'Beta']);
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'button', 'Beta', 'warnings']);
   } finally {
     view.close();
   }
