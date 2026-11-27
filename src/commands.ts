@@ -3,7 +3,7 @@
 import { AtlasError } from './core/errors.ts';
 import { filterWords, firstSentence, skillLink, type Repository, type Skill } from './core/model.ts';
 import { parseGitHubOwner } from './core/github.ts';
-import type { OrganisationResult, Progress } from './core/organisation.ts';
+import { listedRepositories, type OrganisationResult, type Progress } from './core/organisation.ts';
 import { scan, type Source } from './core/scan.ts';
 
 export type Context = {
@@ -139,13 +139,13 @@ function printRepository(
 }
 
 /**
- * `<organisation> · N repositories · M skills`, then each repository with its skill count;
- * `not scanned` for the ones that failed. Warnings go to stderr.
+ * `<organisation> · N repositories · M skills`, all of them counted, then each repository with its
+ * skill count, the ones with no skills left out; `not scanned` for the ones that failed. Warnings go
+ * to stderr.
  */
 function printOrganisation(result: OrganisationResult, { print, error, style = plain }: Context) {
-  const repositories = result.repositories.length;
-  print(`${style.strong(result.organisation.name)} · ${plural(repositories, 'repository', 'repositories')} · ${plural(result.skills, 'skill', 'skills')}`);
-  for (const repository of result.repositories) {
+  print(`${style.strong(result.organisation.name)} · ${plural(result.repositories.length, 'repository', 'repositories')} · ${plural(result.skills, 'skill', 'skills')}`);
+  for (const repository of listedRepositories(result.repositories)) {
     const count = repository.skillCount === undefined ? style.dim('not scanned') : plural(repository.skillCount, 'skill', 'skills');
     print(`${style.strong(repository.name)} — ${count}`);
   }

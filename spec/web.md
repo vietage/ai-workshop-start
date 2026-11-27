@@ -24,37 +24,68 @@
 - An **organisation** link, `github.com/<org>`: above the skills, `<org> · N repositories · M skills`,
   its **repositories** in a *column*, one a line, each with its count *next to its name* (`N skills`,
   or `not scanned`), in the CLI's order, and its warnings; no skills until one is selected
+  - Repositories scanned with **0 skills** (an empty one too) → *not listed*; `not scanned` ones
+    stay; the header's `N repositories` still counts *all* of them, as the CLI's; their warnings stay
+  - Every one with 0 skills → no repositories, `<org> · N repositories · 0 skills`; no error
   - While it scans: a **progress bar** under the field, `N of M repositories scanned`, as each
     repository is done; *hidden* once the scan ends, also when it fails; another link entered →
     the earlier scan's progress is not shown
-  - A repository selected → its skills as for its link, at the commit counted; the filter as today
-  - An empty repository selected → no skills, `No skills in this repository.`, no error; not
-    scanned again
-  - It fails → its message; the organisation stays
+  - **Tabs**, in the page (not the browser's), above the organisation: its own tab, `<org>`, first,
+    then the **repository's tab**, `<repo>` and a close button `×`, once one is selected: *one* tab,
+    whose contents change to the repository selected; the active one tinted, with an accent bar
+    - The organisation's tab: its repositories, as above; no skills, no filter
+    - A repository selected → the repository's tab, made active: its skills as for its link, at the
+      commit counted, and the filter; that repository marked in the list
+    - Each repository opened keeps its own selected skill and filter, and its skills: selected
+      again → as it was left, not scanned again; one opened for the first time: no filter
+    - While it scans: `Scanning <repo>…`, nothing else; its answer is kept, shown only if it is
+      still the active tab's
+    - Switching tabs scans nothing again: the organisation's tab shows its repositories as scanned
+    - `×` → the repository's tab closed, the organisation's active, nothing scanned, nothing
+      forgotten; the organisation's tab cannot be closed
+    - Another link entered → the tabs closed, the repositories opened forgotten; a repository link
+      has no tabs
+  - A repository not listed, in the URL (`repository=<name>`) → the organisation's tab, none
+    selected; no error
+  - It fails → its message in the repository's tab; the organisation's tab stays; selected again
+    → scanned again
   - Unknown organisation → its message, nothing else
 - Warnings, under the skills; a failed scan → its message, nothing else
   - GitHub that does not answer → after the time limit (`spec/analysis.md`, *Details*), its
     message, `Cannot reach GitHub: no answer in 30 s for <url>`; the button back to `Scan`
+  - An answer that is not the API's JSON → `The server answered <status>`, not a parser's error
 - The page's URL keeps the link, the skill and the filter: `?repo=<link>&skill=<path>&filter=<words>`,
   the words joined by one space;
   reload shows the same, a failed scan's message too
+  - A long link, as long as a browser's URL allows: the same, its scan's message, wrapped in its box,
+    on reload too
   - A failed scan keeps `filter=` in the URL, with the failed link; the filter is hidden with the
     skills, and a reload restores its words
-  - An organisation: `?repo=github.com/<org>&repository=<name>&skill=<path>&filter=<words>`
+  - An organisation: the active tab's: `?repo=github.com/<org>` for the organisation's tab;
+    `?repo=github.com/<org>&repository=<name>&skill=<path>&filter=<words>` for a repository's.
+    Reload restores the organisation's tab and, with `repository=`, the repository's tab with that
+    repository, active, with its skill and filter; the other repositories opened are not kept
 ## Style
 A modern **gradient** style, light and dark as the system's colours:
 - The header on a violet-to-pink gradient; the page on a soft gradient
 - The organisation, the skills and the SKILL.md on rounded *cards*
 - A selected skill or repository: a gradient tint and an accent bar; the skill's name in the
   gradient; a repository's count in a pill
+- The tabs on rounded cards; the active tab: a gradient tint and an accent bar
 ## API
 `GET /api/scan?repo=<link>[&filter=<words>]` → JSON: `repository`, `skills` (each with its `link`
 and `content`, the SKILL.md text), `total` (the count before the filter), `warnings`
 - `filter`: only the skills that match every word, as `--filter`; no words → no filter
 - No link, a scan that fails, or a malformed request → status 400, `{ "error": <message> }`
+  - A request up to *4 MB*, its URL and headers (Node's default: 16 KB), more than a browser's
+    URL: a long link → its scan's message; the page's own URL with it → the page
+  - Longer → status 400, `{ "error": "The request is too long: at most 4 MB" }`, not a 431
+  - A request Node can't parse (a header line without a colon) → status 400,
+    `{ "error": "Not a valid request" }`, not Node's empty 400; the server keeps running
 - Each file is read once: the page shows the text the scan parsed
 - An organisation → JSON: `organisation` (`name`, `url`), `repositories` (each with `name`, `url`,
   `commit`, `skillCount`; `null` for one that failed), `skills` (their sum), `warnings`
+  - *Every* repository, those with 0 skills too: the page leaves them out
   - With `filter` → status 400; unknown organisation → status 400
   - The same JSON, and the same `stream=1` lines, with a cold or a warm *cache*; a repository
     scanned by the CLI is not fetched again, and the other way round

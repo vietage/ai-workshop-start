@@ -491,8 +491,10 @@ test('organisation: github.com/<org>, with or without the scheme or a trailing s
   }
 });
 
-test('organisation: its repositories with their skill counts, by count, then by name in any case', () => {
+test('organisation: its repositories with their skill counts, by count, then by name in any case; none with 0 skills', () => {
   assert.equal(organisation.code, 0, organisation.stderr);
+  // Docs, empty (no commit) and huge have 0 skills: not listed, but counted in the header; broken,
+  // not scanned, stays.
   assert.equal(
     organisation.stdout,
     [
@@ -500,12 +502,38 @@ test('organisation: its repositories with their skill counts, by count, then by 
       'alpha — 2 skills',
       'Beta — 2 skills',
       'example-tools — 2 skills',
-      'Docs — 0 skills',
-      'empty — 0 skills',
-      'huge — 0 skills',
       'broken — not scanned',
     ].join('\n'),
   );
+});
+
+test('organisation: repositories with 0 skills not listed; every one with 0 skills → only the header, exit code 0', async () => {
+  // A user whose repositories each have no skill, one of them failing: it alone is listed.
+  const repositories = ['a', 'b', 'c'];
+  const scanEmpty = (failing: string[]) => (input: string) =>
+    scanOrganisation(input, {
+      fetch: async (url) => {
+        if (url.endsWith('/users/quiet')) return Response.json({ login: 'quiet', type: 'User' });
+        if (url.includes('/users/quiet/repos')) {
+          return Response.json(repositories.map((name) => ({ name, full_name: `quiet/${name}`, default_branch: 'main', archived: false, fork: false })));
+        }
+        if (failing.some((name) => url.includes(`/repos/quiet/${name}/`))) throw new Error('connection refused');
+        if (url.includes('/commits/main')) return Response.json({ sha: EXAMPLE_COMMIT });
+        return Response.json({ truncated: false, tree: [{ path: 'README.md', type: 'blob' }] });
+      },
+    });
+  assert.deepEqual(await atlas(['scan', 'github.com/quiet'], { scan: scanEmpty([]) }), {
+    code: 0,
+    stdout: 'quiet · 3 repositories · 0 skills',
+    stderr: '',
+  });
+  assert.deepEqual(await atlas(['scan', 'github.com/quiet'], { scan: scanEmpty(['b']) }), {
+    code: 0,
+    stdout: 'quiet · 3 repositories · 0 skills\nb — not scanned',
+    stderr: 'warning: b: not scanned: Cannot reach GitHub: connection refused',
+  });
+  // The core keeps every repository, with its count: only the output leaves them out.
+  assert.deepEqual((await scanEmpty([])('github.com/quiet')).repositories.map((repository) => repository.skillCount), [0, 0, 0]);
 });
 
 test('organisation: each repository by the same rules as one repository; its warnings start with its name', async () => {
