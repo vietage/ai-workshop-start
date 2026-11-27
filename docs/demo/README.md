@@ -16,6 +16,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [organisation-cache.mp4](organisation-cache.mp4) | [organisation-cache.json](organisation-cache.json) | the cache of an organisation's scan, [#22](https://github.com/vietage/ai-workshop-start/issues/22) |
 | [nicer-skill-list.mp4](nicer-skill-list.mp4) | [nicer-skill-list.json](nicer-skill-list.json) | the gradient style, an organisation's repositories in a column, [#30](https://github.com/vietage/ai-workshop-start/issues/30) |
 | [hide-empty-repositories.mp4](hide-empty-repositories.mp4) | [hide-empty-repositories.json](hide-empty-repositories.json) | an organisation's list without its repositories with 0 skills, [#39](https://github.com/vietage/ai-workshop-start/issues/39) |
+| [scan-button.mp4](scan-button.mp4) | [scan-button.json](scan-button.json) | the Scan button back to `Scan` once the latest scan ends, [#34](https://github.com/vietage/ai-workshop-start/issues/34) |
 
 ## word-filter
 
@@ -97,3 +98,18 @@ skills), then the CLI. Recorded with a warm cache (`SKILL_ATLAS_CACHE=/tmp/skill
 | `multik` selected | its 2 skills | a repository selected, as before |
 | `scan github.com/Kotlin` in the CLI | the same header, the same 3 lines | the CLI does the same ([spec/cli.md](../../spec/cli.md)) |
 | `grep -c ' — 0 skills'` | `0` | no line with 0 skills |
+
+## scan-button
+
+The web view on the `Kotlin` organisation, on its default branches, then a directory that does
+not exist:
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `github.com/Kotlin`, Scan | `Scanning…`, disabled; `Scan` once the repositories are shown | the button while a scan runs, and after |
+| `kotlinx-rpc` selected | `Scanning…`, then `Scan` with its skills | a repository opened from an organisation |
+| `dataframe`, then `multik` at once | `Scan` once `multik` is shown | the button follows the latest scan only |
+| `/no/such/directory`, Scan | its message, `Scan`, enabled | after a failure too |
+
+A scan that never ends (the case of [#34](https://github.com/vietage/ai-workshop-start/issues/34))
+cannot be recorded against GitHub; `tests/web.test.ts` stalls one in a stand-in server.
