@@ -11,5 +11,5 @@ spec: spec/web.md#the-page
 ## Expected
 - `code-style` shows `also in .github/skills/code-style/SKILL.md`.
 - `commits` shows `also in .github/skills/commits/SKILL.md`.
-- Under the skills, two warnings: the malformed front matter of `release-checklist`, and the
-  copies of `commits` that differ.
+- In their own area above the skills, `2 warnings`: the malformed front matter of
+  `release-checklist`, and the copies of `commits` that differ.
