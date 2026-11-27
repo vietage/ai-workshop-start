@@ -55,11 +55,13 @@ test('./skill-atlas scan github.com/<org> lists its repositories with their skil
   const scanned = await atlas(['scan', 'github.com/vietage'], cache);
   assert.equal(scanned.code, 0, scanned.stderr);
   const [header, ...lines] = scanned.stdout.trimEnd().split('\n');
+  // All its repositories counted; the ones with 0 skills not listed.
   const total = /^vietage · (\d+) repositor(?:y|ies) · (\d+) skills?$/.exec(header);
   assert.ok(total, header);
-  assert.equal(lines.length, Number(total[1]));
+  assert.ok(lines.length <= Number(total[1]), header);
   const repositories = lines.map((line) => {
-    const match = /^([\w.-]+) — (?:(\d+) skills?|not scanned)$/.exec(line);
+    // Never `0 skills`: those are not listed.
+    const match = /^([\w.-]+) — (?:([1-9]\d*) skills?|not scanned)$/.exec(line);
     assert.ok(match, line);
     return { name: match[1], count: match[2] === undefined ? -1 : Number(match[2]) };
   });

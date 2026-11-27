@@ -126,6 +126,9 @@ let scanning;
 // Scans under way: the Scan button waits for all of them.
 let pending = 0;
 const plural = (count, one, many) => count + ' ' + (count === 1 ? one : many);
+// The same rule as listedRepositories in src/core/organisation.ts: every repository but those
+// scanned with no skills; the ones not scanned stay.
+const listed = () => organisation.repositories.filter((entry) => entry.skillCount !== 0);
 
 // The same rule as filterSkills in src/core/model.ts: the name or the description contains every
 // word, each in any case, in any order.
@@ -222,7 +225,7 @@ function scan(repo, skill, name) {
         organisation = body;
         result = undefined;
         showOrganisation();
-        if (organisation.repositories.some((entry) => entry.name === name)) return await openRepository(name, skill);
+        if (listed().some((entry) => entry.name === name)) return await openRepository(name, skill);
         $('main').hidden = true;
         setUrl(repo);
         return;
@@ -247,7 +250,10 @@ function failed(error) {
   $('error').textContent = error.message;
 }
 
-/** The organisation: its repositories, each with its skill count, and its warnings. */
+/**
+ * The organisation: all its repositories counted; each one with its skill count, the ones with no
+ * skills left out; and its warnings.
+ */
 function showOrganisation() {
   const { organisation: owner, repositories, skills, warnings } = organisation;
   $('organisation').hidden = false;
@@ -255,7 +261,7 @@ function showOrganisation() {
     element('strong', '', owner.name),
     ' · ' + plural(repositories.length, 'repository', 'repositories') + ' · ' + plural(skills, 'skill', 'skills'),
   );
-  $('repositories').replaceChildren(...repositories.map((entry) => {
+  $('repositories').replaceChildren(...listed().map((entry) => {
     const item = element('li');
     item.setAttribute('role', 'option');
     item.setAttribute('aria-selected', 'false');
@@ -274,11 +280,6 @@ async function openRepository(name, skill) {
   repository = name;
   for (const item of $('repositories').children) item.setAttribute('aria-selected', String(item.dataset.name === name));
   $('error').textContent = '';
-  // Empty, without a commit: nothing to scan, and no skills, as its count says.
-  if (!entry.commit && entry.skillCount === 0) {
-    result = { repository: { id: entry.url.replace('https://github.com/', '') }, skills: [], total: 0, warnings: [] };
-    return show(skill);
-  }
   const current = organisation;
   try {
     const body = await request(entry.commit ? entry.url + '/tree/' + entry.commit : entry.url);

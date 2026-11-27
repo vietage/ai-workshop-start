@@ -18,12 +18,14 @@
 - An **organisation** link, `github.com/<org>`: above the skills, `<org> · N repositories · M skills`,
   its **repositories** in a *column*, one a line, each with its count *next to its name* (`N skills`,
   or `not scanned`), in the CLI's order, and its warnings; no skills until one is selected
+  - Repositories scanned with **0 skills** (an empty one too) → *not listed*; `not scanned` ones
+    stay; the header's `N repositories` still counts *all* of them, as the CLI's; their warnings stay
+  - Every one with 0 skills → no repositories, `<org> · N repositories · 0 skills`; no error
   - While it scans: a **progress bar** under the field, `N of M repositories scanned`, as each
     repository is done; *hidden* once the scan ends, also when it fails; another link entered →
     the earlier scan's progress is not shown
   - A repository selected → its skills as for its link, at the commit counted; the filter as today
-  - An empty repository selected → no skills, `No skills in this repository.`, no error; not
-    scanned again
+  - A repository not listed, in the URL (`repository=<name>`) → the organisation, none selected
   - It fails → its message; the organisation stays
   - Unknown organisation → its message, nothing else
 - Warnings, under the skills; a failed scan → its message, nothing else
@@ -47,6 +49,7 @@ and `content`, the SKILL.md text), `total` (the count before the filter), `warni
 - Each file is read once: the page shows the text the scan parsed
 - An organisation → JSON: `organisation` (`name`, `url`), `repositories` (each with `name`, `url`,
   `commit`, `skillCount`; `null` for one that failed), `skills` (their sum), `warnings`
+  - *Every* repository, those with 0 skills too: the page leaves them out
   - With `filter` → status 400; unknown organisation → status 400
   - The same JSON, and the same `stream=1` lines, with a cold or a warm *cache*; a repository
     scanned by the CLI is not fetched again, and the other way round
