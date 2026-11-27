@@ -48,9 +48,12 @@
     → scanned again
   - Unknown organisation → its message, nothing else
 - Warnings, under the skills; a failed scan → its message, nothing else
+  - An answer that is not the API's JSON → `The server answered <status>`, not a parser's error
 - The page's URL keeps the link, the skill and the filter: `?repo=<link>&skill=<path>&filter=<words>`,
   the words joined by one space;
   reload shows the same, a failed scan's message too
+  - A long link, as long as a browser's URL allows: the same, its scan's message, wrapped in its box,
+    on reload too
   - A failed scan keeps `filter=` in the URL, with the failed link; the filter is hidden with the
     skills, and a reload restores its words
   - An organisation: the active tab's: `?repo=github.com/<org>` for the organisation's tab;
@@ -69,6 +72,9 @@ A modern **gradient** style, light and dark as the system's colours:
 and `content`, the SKILL.md text), `total` (the count before the filter), `warnings`
 - `filter`: only the skills that match every word, as `--filter`; no words → no filter
 - No link, a scan that fails, or a malformed request → status 400, `{ "error": <message> }`
+  - A request up to *4 MB*, its URL and headers (Node's default: 16 KB), more than a browser's
+    URL: a long link → its scan's message; the page's own URL with it → the page
+  - Longer → status 400, `{ "error": "The request is too long: at most 4 MB" }`, not a 431
 - Each file is read once: the page shows the text the scan parsed
 - An organisation → JSON: `organisation` (`name`, `url`), `repositories` (each with `name`, `url`,
   `commit`, `skillCount`; `null` for one that failed), `skills` (their sum), `warnings`
