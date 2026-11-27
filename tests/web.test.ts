@@ -656,6 +656,96 @@ test('page: an organisation link → its repositories with their counts; selecti
   }
 });
 
+test('page: an organisation\'s repositories in a column, one a line, the count next to each name', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    assert.equal(style(view.$('repositories')).display, 'flex');
+    assert.equal(style(view.$('repositories')).flexDirection, 'column');
+    for (const item of view.$('repositories').children) {
+      // The name, then its count right after it, on the same line.
+      assert.deepEqual([...item.children].map((child) => child.className), ['name', 'count']);
+      assert.equal(style(item).display, 'flex');
+      assert.notEqual(style(item).flexDirection, 'column');
+    }
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a gradient style: the header, the page, cards, the selected skill and its name', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    const document = view.dom.window.document;
+    assert.match(style(document.querySelector('header')!).backgroundImage, /^linear-gradient\(/);
+    assert.match(style(document.body).backgroundImage, /^linear-gradient\(/);
+    // Rounded cards: jsdom gives `0px` for an element with no radius.
+    for (const id of ['organisation', 'list', 'skill']) assert.match(style(view.$(id)).borderRadius, /^[1-9]\d*px$/, id);
+    const selected = view.items().find((item) => item.getAttribute('aria-selected') === 'true')!;
+    const other = view.items().find((item) => item.getAttribute('aria-selected') === 'false')!;
+    // The selected skill: a gradient tint and an accent bar; the others neither.
+    assert.match(style(selected).backgroundImage, /^linear-gradient\(/);
+    assert.match(style(selected).boxShadow, /\binset\b/);
+    assert.doesNotMatch(style(other).backgroundImage, /gradient/);
+    assert.doesNotMatch(style(other).boxShadow, /\binset\b/);
+    assert.match(style(view.$('skill').querySelector('h2')!).backgroundImage, /^linear-gradient\(/);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a gradient style: the selected repository tinted, with an accent bar; each count in a pill', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    const repositories = () => [...view.$('repositories').children] as HTMLElement[];
+    const scans = view.scans();
+    repositories()[1].dispatchEvent(new view.dom.window.Event('click'));
+    await view.settled(scans + 1);
+    const [first, selected] = repositories();
+    assert.equal(selected.getAttribute('aria-selected'), 'true');
+    assert.match(style(selected).backgroundImage, /^linear-gradient\(/);
+    assert.match(style(selected).boxShadow, /\binset\b/);
+    assert.doesNotMatch(style(first).backgroundImage, /gradient/);
+    assert.doesNotMatch(style(first).boxShadow, /\binset\b/);
+    for (const item of repositories()) {
+      const count = item.querySelector('.count')!;
+      assert.match(style(count).borderRadius, /^[1-9]\d*px$/, item.dataset.name);
+      assert.notEqual(style(count).backgroundColor, 'rgba(0, 0, 0, 0)', item.dataset.name);
+    }
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a gradient style, light and dark as the system\'s colours', { timeout: 5_000 }, async () => {
+  // jsdom evaluates no media queries, so this reads the page's style sheet itself.
+  const view = await page('/');
+  try {
+    const sheet = view.dom.window.document.styleSheets[0];
+    const rules = [...sheet.cssRules];
+    const root = rules.find((rule) => (rule as CSSStyleRule).selectorText === ':root') as CSSStyleRule;
+    assert.equal(root.style.getPropertyValue('color-scheme'), 'light dark');
+    const dark = rules.find((rule) => (rule as CSSMediaRule).media?.mediaText === '(prefers-color-scheme: dark)') as CSSMediaRule;
+    assert.ok(dark, 'a (prefers-color-scheme: dark) rule');
+    const darkRoot = [...dark.cssRules].find((rule) => (rule as CSSStyleRule).selectorText === ':root') as CSSStyleRule;
+    assert.ok(darkRoot, 'a :root rule for dark colours');
+    for (const name of ['--page', '--card', '--text', '--accent', '--selected']) {
+      const light = root.style.getPropertyValue(name);
+      const value = darkRoot.style.getPropertyValue(name);
+      assert.notEqual(value, '', name);
+      assert.notEqual(value, light, name);
+    }
+    assert.match(darkRoot.style.getPropertyValue('--page'), /^linear-gradient\(/);
+  } finally {
+    view.close();
+  }
+});
+
 test('page: the URL keeps the organisation and the repository; reload shows the same', { timeout: 5_000 }, async () => {
   const view = await page(`/?repo=${encodeURIComponent('github.com/skillatlas')}&repository=alpha&skill=${encodeURIComponent('web/.github/skills/two/SKILL.md')}`);
   try {

@@ -17,6 +17,9 @@ build-tools-bump-gradle-api — Bumps the Gradle API version that Kotlin Gradle 
 and any order: `./skill-atlas scan https://github.com/JetBrains/kotlin --filter "gradle bump"`; the
 header shows `N of M skills`. The web view's filter field works the same way.
 
+In a terminal, the names are bold and the links dim; piped, or with `NO_COLOR` set, the output is
+plain text, the same words.
+
 An organisation, or a user: `./skill-atlas scan github.com/JetBrains` lists its repositories, each
 with its skill count, the most first; archived repositories and forks are skipped. While it scans, a
 progress bar shows how many repositories are done, in the terminal and in the web view.
@@ -29,8 +32,9 @@ commit and fetches again only the ones that changed; the output is the same.
 the cache, and a missing or broken one never fails a scan. One repository's scan stores nothing.
 
 Or in a browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
-for the repository or organisation link, its skills (with a field to filter them) and each one's SKILL.md
-(`--port <port>` for another port).
+for the repository or organisation link (an organisation's repositories in a column, each with its
+skill count), its skills (with a field to filter them) and each one's SKILL.md, in a gradient style,
+light or dark as the system's colours (`--port <port>` for another port).
 
 Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests. `npm run qa` tests the
 web view in a browser, scenario by scenario, and records each one; `npm run qa:issues` files an issue

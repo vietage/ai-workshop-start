@@ -16,8 +16,8 @@
   - The selected skill filtered out → the first one that matches is selected
 - A skill selected → its **SKILL.md**, the file as it is, and its link
 - An **organisation** link, `github.com/<org>`: above the skills, `<org> · N repositories · M skills`,
-  its **repositories** with their counts (`N skills`, or `not scanned`), in the CLI's order, and its
-  warnings; no skills until one is selected
+  its **repositories** in a *column*, one a line, each with its count *next to its name* (`N skills`,
+  or `not scanned`), in the CLI's order, and its warnings; no skills until one is selected
   - While it scans: a **progress bar** under the field, `N of M repositories scanned`, as each
     repository is done; *hidden* once the scan ends, also when it fails; another link entered →
     the earlier scan's progress is not shown
@@ -33,6 +33,12 @@
   - A failed scan keeps `filter=` in the URL, with the failed link; the filter is hidden with the
     skills, and a reload restores its words
   - An organisation: `?repo=github.com/<org>&repository=<name>&skill=<path>&filter=<words>`
+## Style
+A modern **gradient** style, light and dark as the system's colours:
+- The header on a violet-to-pink gradient; the page on a soft gradient
+- The organisation, the skills and the SKILL.md on rounded *cards*
+- A selected skill or repository: a gradient tint and an accent bar; the skill's name in the
+  gradient; a repository's count in a pill
 ## API
 `GET /api/scan?repo=<link>[&filter=<words>]` → JSON: `repository`, `skills` (each with its `link`
 and `content`, the SKILL.md text), `total` (the count before the filter), `warnings`

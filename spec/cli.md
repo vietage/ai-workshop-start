@@ -17,6 +17,9 @@ build-tools-bump-gradle-api — Bumps the Gradle API…
 ```
 - Sorted by **name**; the description's *first sentence*
 - `also in <paths>` for copies; warnings go to *stderr*
+- stdout a *terminal*: the names (and `<owner>/<repo>`) **bold**, the links and `also in` *dim*;
+  with `NO_COLOR` set, or stdout not a terminal (piped, a file, the tests' stored output) → plain
+  text; the text is the same either way
 - With `--filter`: the header counts both, `JetBrains/kotlin · 2 of 6 skills`; sorting, the first
   sentence, `also in` and the warnings are unchanged
 - No match → the header, `· 0 of N skills`, then `no skills match "<words>"`, the words joined by
@@ -40,6 +43,8 @@ intellij-community — 41 skills
   line as each repository is done; *erased* when the scan ends, before the result, also on an error
   - stderr not a terminal (piped, a file, the tests' stored output) → no progress bar; the output
     is the same either way
+- stdout a *terminal*: `<org>` and each `<repo>` **bold**, `not scanned` *dim*; as for one
+  repository, plain otherwise
 - Warnings go to *stderr*, `warning: <repo>: …`; exit code 0
 - With `--filter` → `--filter works on one repository, not on an organisation`, exit code 1
 - Unknown organisation → its message, exit code 1
