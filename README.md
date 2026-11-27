@@ -56,6 +56,9 @@ pull request, and compares the screenshots of their key moments with the Linux b
 - [red-agent](.agents/skills/red-agent/SKILL.md): an agent tries to break the web view beyond the QA
   scenarios and files an issue per bug, with the steps, what the spec expects and a video, labelled
   `Delegated to AI` so that issue-to-pr fixes it ([spec/red-agent.md](spec/red-agent.md)).
+- [status-update](.agents/skills/status-update/SKILL.md): the pull requests merged and the issues
+  resolved since a date, posted to your private Slack channel (`SLACK_STATUS_CHANNEL`), never the
+  shared `#my-ai-workshop` ([spec/status-update.md](spec/status-update.md)).
 - [memory/](memory/README.md): notes agents leave for the next task, what a task learned; written
   at the end of a task by the [update-memory](.agents/skills/update-memory/SKILL.md) skill, and
   never reviewed.

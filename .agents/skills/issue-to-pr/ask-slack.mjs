@@ -16,8 +16,8 @@ export const POLL_INTERVAL = 15;
 
 const minutes = (seconds) => (seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`);
 
-/** One Slack Web API call; its JSON, or an error with Slack's own reason. */
-async function slack(env, fetchImpl, method, params, body) {
+/** One Slack Web API call; its JSON, or an error with Slack's own reason. Also used by status-update. */
+export async function slack(env, fetchImpl, method, params, body) {
   const url = new URL(`${env.SLACK_API_URL || 'https://slack.com/api'}/${method}`);
   for (const [key, value] of Object.entries(params ?? {})) url.searchParams.set(key, value);
   const response = await fetchImpl(url, {
