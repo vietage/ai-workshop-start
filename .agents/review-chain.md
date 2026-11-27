@@ -20,6 +20,9 @@ push to the PR ─▶ workflow: status  │
   body says `Verdict: approve` or `Verdict: need changes`.
 - [address-review](skills/address-review/SKILL.md) acts on the verdict: merges, or addresses the
   findings and commits. The push of that commit starts the next review.
+- Notes in [memory/](../memory/README.md), added by the
+  [update-memory](skills/update-memory/SKILL.md) skill, are not part of the chain: they are never
+  reviewed, and both skills skip `memory/`.
 - [The workflow](../.github/workflows/review-chain.yml) makes the hand-overs the agents can't:
   it sets the status on every push to a PR and from every review with a verdict, and starts the
   review of a pushed commit.

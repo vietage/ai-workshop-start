@@ -56,6 +56,9 @@ gh api "repos/$repo/issues/$pr/comments?per_page=100" --paginate --jq '.[]
 ## 2. Collect the change
 
 - `gh pr diff $pr`, and the files it touches at `$head`: `gh pr checkout $pr`.
+- **Skip `memory/`.** Notes in `memory/`, added by the
+  [update-memory](../update-memory/SKILL.md) skill, are never reviewed: no findings, no comments,
+  no approval asked, and they don't change the verdict.
 - **A re-review** (the PR's commits have an earlier verdict status): also read your earlier reviews
   (`gh api "repos/$repo/pulls/$pr/reviews?per_page=100" --paginate`), the inline threads and the
   replies to them since (`gh api "repos/$repo/pulls/$pr/comments?per_page=100" --paginate`). The
