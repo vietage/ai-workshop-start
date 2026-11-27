@@ -1779,6 +1779,12 @@ test('page: Stop before an organisation\'s repositories are listed, or on a repo
   const view = await page('/', held.port);
   const button = view.$('scan') as HTMLButtonElement;
   try {
+    // A scan before, with warnings: Stop leaves none of them.
+    held.release();
+    await view.enter(FIXTURE);
+    assert.equal(view.$('problems').hidden, false);
+    assert.ok(view.$('warnings').children.length > 0);
+    held.hold();
     for (const [index, link] of ['github.com/skillatlas', FIXTURE].entries()) {
       (view.$('repo') as HTMLInputElement).value = link;
       view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
@@ -1790,8 +1796,10 @@ test('page: Stop before an organisation\'s repositories are listed, or on a repo
       assert.equal(view.$('main').hidden, true);
       assert.equal(view.$('progress').hidden, true);
       assert.equal(view.$('error').textContent, '');
+      assert.equal(view.$('problems').hidden, true);
+      assert.equal(view.$('warnings').children.length, 0);
       assert.deepEqual(view.search(), { repo: link });
-      await until(() => held.signals[index].aborted);
+      await until(() => held.signals[index + 1].aborted);
     }
     // Scan again: its skills.
     held.release();

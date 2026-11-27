@@ -341,6 +341,8 @@ function scan(repo, skill, name, filter) {
       $('main').hidden = true;
       if (!listing) {
         $('organisation').hidden = true;
+        // Nothing shown: no warnings either, not even the scan's before.
+        showWarnings();
         return setUrl(repo);
       }
       organisation = partialOrganisation(listing, done);
