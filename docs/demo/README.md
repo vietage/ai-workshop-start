@@ -16,6 +16,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [organisation-cache.mp4](organisation-cache.mp4) | [organisation-cache.json](organisation-cache.json) | the cache of an organisation's scan, [#22](https://github.com/vietage/ai-workshop-start/issues/22) |
 | [nicer-skill-list.mp4](nicer-skill-list.mp4) | [nicer-skill-list.json](nicer-skill-list.json) | the gradient style, an organisation's repositories in a column, [#30](https://github.com/vietage/ai-workshop-start/issues/30) |
 | [scan-button.mp4](scan-button.mp4) | [scan-button.json](scan-button.json) | the Scan button back to `Scan` once the latest scan ends, [#34](https://github.com/vietage/ai-workshop-start/issues/34) |
+| [keyboard-lists.mp4](keyboard-lists.mp4) | [keyboard-lists.json](keyboard-lists.json) | the skills and an organisation's repositories from the keyboard, [#47](https://github.com/vietage/ai-workshop-start/issues/47) |
 
 ## word-filter
 
@@ -100,3 +101,15 @@ not exist:
 
 A scan that never ends (the case of [#34](https://github.com/vietage/ai-workshop-start/issues/34))
 cannot be recorded against GitHub; `tests/web.test.ts` stalls one in a stand-in server.
+
+## keyboard-lists
+
+The web view on `./fixture`, then `github.com/Kotlin`, without the mouse:
+
+| Keys | Shows |
+| --- | --- |
+| Tab, Tab, Tab | *Scan*, the filter, then the selected skill, with an outline |
+| ArrowDown, ArrowDown | the focus moves; the selected skill and its SKILL.md stay |
+| Enter; ArrowDown, Space | the skill focused selected, its SKILL.md |
+| `commit` in the filter, ArrowDown | the focus on to the skills |
+| Tab, Tab, ArrowDown ×2, Enter | an organisation's repository opened, its skills |

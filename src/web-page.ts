@@ -53,6 +53,8 @@ export const PAGE = `<!doctype html>
   #skills li { padding: 10px 16px; border-top: 1px solid var(--border); cursor: pointer; }
   #skills li:hover { background: #8b5cf60f; }
   #skills li[aria-selected="true"] { background: var(--selected); box-shadow: inset 3px 0 var(--accent); }
+  /* The item the keyboard is on: a visible focus, selected or not. */
+  [role="option"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .name { font-weight: 600; }
   .description { font-size: 13px; }
   .path, .copies { font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; word-break: break-all; }
@@ -92,7 +94,7 @@ export const PAGE = `<!doctype html>
 </header>
 <section id="organisation" hidden>
   <div id="org-summary"></div>
-  <ul id="repositories" role="listbox"></ul>
+  <ul id="repositories" role="listbox" aria-label="Repositories"></ul>
   <ul id="org-warnings"></ul>
 </section>
 <div id="error" role="alert"></div>
@@ -101,7 +103,7 @@ export const PAGE = `<!doctype html>
     <div id="summary"></div>
     <input id="filter" type="search" placeholder="Filter by name or description" aria-label="Filter skills" autocomplete="off">
     <p id="no-match"></p>
-    <ul id="skills" role="listbox"></ul>
+    <ul id="skills" role="listbox" aria-label="Skills"></ul>
     <ul id="warnings"></ul>
   </section>
   <section id="skill"><p class="placeholder">Select a skill to see its SKILL.md.</p></section>
@@ -143,6 +145,35 @@ function setUrl(repo, skill) {
   if (filterWords()) params.set('filter', filterWords());
   const query = params.toString();
   history.replaceState(null, '', query ? '?' + query : location.pathname);
+}
+
+/**
+ * A list from the keyboard: one item in the Tab order, the selected one, else the first; the arrow
+ * keys, Home and End move the focus through it; Enter or Space selects the item focused, as a click.
+ */
+function rove(list, item) {
+  const items = [...list.children];
+  const current = item ?? items.find((entry) => entry.getAttribute('aria-selected') === 'true') ?? items[0];
+  for (const entry of items) entry.tabIndex = entry === current ? 0 : -1;
+  return current;
+}
+function focusItem(list, item) {
+  rove(list, item)?.focus();
+}
+for (const list of [$('skills'), $('repositories')]) {
+  list.addEventListener('keydown', (event) => {
+    const items = [...list.children];
+    const index = items.indexOf(event.target);
+    if (index < 0 || event.altKey || event.ctrlKey || event.metaKey) return;
+    const moves = { ArrowDown: items[index + 1], ArrowUp: items[index - 1], Home: items[0], End: items[items.length - 1] };
+    if (event.key in moves) {
+      event.preventDefault();
+      if (moves[event.key]) focusItem(list, moves[event.key]);
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      event.target.click();
+    }
+  });
 }
 
 /** The scan of a link: the API's answer, or its message as an error. */
@@ -269,6 +300,7 @@ function showOrganisation() {
     item.addEventListener('click', () => organisation === shown && busy(() => openRepository(entry.name)));
     return item;
   }));
+  rove($('repositories'));
   $('org-warnings').replaceChildren(...warnings.map((warning) => element('li', '', warning)));
 }
 
@@ -277,6 +309,7 @@ async function openRepository(name, skill) {
   const entry = organisation.repositories.find((candidate) => candidate.name === name);
   repository = name;
   for (const item of $('repositories').children) item.setAttribute('aria-selected', String(item.dataset.name === name));
+  rove($('repositories'));
   $('error').textContent = '';
   // Empty, without a commit: nothing to scan, and no skills, as its count says.
   if (!entry.commit && entry.skillCount === 0) {
@@ -327,6 +360,7 @@ function select(path) {
   const skill = result.skills.find((skill) => skill.path === path);
   selected = skill?.path;
   for (const item of $('skills').children) item.setAttribute('aria-selected', String(item.dataset.path === path));
+  rove($('skills'));
   setUrl(scanned, selected);
   const pane = $('skill');
   if (!skill) {
@@ -345,6 +379,13 @@ $('filter').addEventListener('input', () => {
   // After a failed scan there is nothing to narrow, but the URL still keeps the word.
   if (result) show(selected);
   else setUrl(scanned);
+});
+
+// ArrowDown in the filter: on to the skills, the selected one.
+$('filter').addEventListener('keydown', (event) => {
+  if (event.key !== 'ArrowDown' || !$('skills').children.length) return;
+  event.preventDefault();
+  focusItem($('skills'));
 });
 
 $('form').addEventListener('submit', (event) => {

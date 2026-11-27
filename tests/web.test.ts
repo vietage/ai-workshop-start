@@ -1153,3 +1153,135 @@ test('page: a repository of the organisation clicked while another link is scann
     stalled.close();
   }
 });
+
+/** The page's Tab order: what is shown and focusable, in document order, skipping tabindex="-1". */
+function tabOrder(view: Awaited<ReturnType<typeof page>>) {
+  const document = view.dom.window.document;
+  const shown = (node: Element) => {
+    for (let at: Element | null = node; at; at = at.parentElement) {
+      if ((at as HTMLElement).hidden || view.dom.window.getComputedStyle(at).display === 'none') return false;
+    }
+    return true;
+  };
+  return ([...document.querySelectorAll('input, button, a[href], [tabindex]')] as HTMLElement[])
+    .filter((node) => node.tabIndex >= 0 && shown(node))
+    .map((node) => node.id || (node.dataset.path ?? node.dataset.name ?? node.tagName.toLowerCase()));
+}
+/** A key pressed on the element focused, as a browser dispatches it; whether the page took it. */
+function press(view: Awaited<ReturnType<typeof page>>, key: string) {
+  const focused = view.dom.window.document.activeElement!;
+  const event = new view.dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+  focused.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+const focused = (view: Awaited<ReturnType<typeof page>>) => {
+  const node = view.dom.window.document.activeElement as HTMLElement;
+  return node.dataset.path ?? node.dataset.name ?? node.id;
+};
+
+test('page: the skills from the keyboard: Tab reaches the selected one, the arrows move, Enter or Space selects', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    const paths = view.items().map((item) => item.dataset.path!);
+    // The field, Scan, the filter, the skills once, on the selected one, the SKILL.md link.
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'filter', paths[0], 'a']);
+    assert.equal(view.$('skills').getAttribute('role'), 'listbox');
+    assert.ok(view.items().every((item) => item.getAttribute('role') === 'option'));
+
+    // ArrowDown in the filter: on to the selected skill.
+    view.$('filter').focus();
+    assert.equal(press(view, 'ArrowDown'), true);
+    assert.equal(focused(view), paths[0]);
+    // The arrows, Home and End move the focus; the selection stays.
+    press(view, 'ArrowDown');
+    assert.equal(focused(view), paths[1]);
+    press(view, 'End');
+    assert.equal(focused(view), paths[3]);
+    press(view, 'ArrowDown');
+    assert.equal(focused(view), paths[3]);
+    press(view, 'ArrowUp');
+    assert.equal(focused(view), paths[2]);
+    press(view, 'Home');
+    assert.equal(focused(view), paths[0]);
+    press(view, 'ArrowDown');
+    assert.equal(view.selected(), paths[0]);
+    assert.equal(view.$('skill').querySelector('h2')!.textContent, 'code-style');
+
+    // Enter selects the skill focused: its SKILL.md, its link, the URL.
+    assert.equal(press(view, 'Enter'), true);
+    assert.equal(view.selected(), paths[1]);
+    assert.equal(view.$('skill').querySelector('h2')!.textContent, 'commits');
+    assert.equal(view.$('content').textContent, readFileSync(join(FIXTURE, paths[1]), 'utf8'));
+    assert.equal(view.search().skill, paths[1]);
+    assert.equal(focused(view), paths[1]);
+    // Space too, without scrolling the page.
+    press(view, 'ArrowDown');
+    assert.equal(press(view, ' '), true);
+    assert.equal(view.selected(), paths[2]);
+    assert.equal(view.$('skill').querySelector('h2')!.textContent, 'invoices');
+    // Tab comes back to the list on the selected skill, also after the filter narrows it.
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'filter', paths[2], 'a']);
+    view.filter('commit');
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'filter', view.selected(), 'a']);
+    // Other keys are left to the browser.
+    view.items()[0].focus();
+    assert.equal(press(view, 'Tab'), false);
+    assert.equal(press(view, 'a'), false);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: an organisation\'s repositories from the keyboard: Tab reaches them, the arrows move, Enter or Space opens one', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    const repositories = () => [...view.$('repositories').children] as HTMLElement[];
+    assert.equal(view.$('repositories').getAttribute('role'), 'listbox');
+    // None selected yet: Tab reaches the first.
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'alpha']);
+    repositories()[0].focus();
+    press(view, 'ArrowDown');
+    assert.equal(focused(view), 'Beta');
+    // Moving the focus opens nothing.
+    assert.equal(view.$('main').hidden, true);
+    let scans = view.scans();
+    assert.equal(press(view, 'Enter'), true);
+    await view.settled(scans + 1);
+    assert.equal(repositories()[1].getAttribute('aria-selected'), 'true');
+    assert.equal(view.$('summary').textContent, `SkillAtlas/Beta · 2 skills · ${ORGANISATION_COMMIT.slice(0, 12)}`);
+    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'Beta', skill: '.agents/skills/four/SKILL.md' });
+    assert.deepEqual(tabOrder(view), ['repo', 'scan', 'Beta', 'filter', '.agents/skills/four/SKILL.md', 'a']);
+    // Space opens one too.
+    press(view, 'ArrowUp');
+    assert.equal(focused(view), 'alpha');
+    scans = view.scans();
+    assert.equal(press(view, ' '), true);
+    await view.settled(scans + 1);
+    assert.equal(repositories()[0].getAttribute('aria-selected'), 'true');
+    assert.match(view.$('summary').textContent!, /^SkillAtlas\/alpha · 2 skills/);
+    assert.equal(tabOrder(view)[2], 'alpha');
+  } finally {
+    view.close();
+  }
+});
+
+test('page: the skill or repository the keyboard is on → a visible focus', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    const scans = view.scans();
+    ([...view.$('repositories').children][1] as HTMLElement).dispatchEvent(new view.dom.window.Event('click'));
+    await view.settled(scans + 1);
+    // jsdom matches no :focus-visible: read the rule from the sheet, and check it is for both lists.
+    const rules = [...view.dom.window.document.styleSheets[0].cssRules] as CSSStyleRule[];
+    const focus = rules.filter((rule) => rule.selectorText?.includes(':focus-visible') && /^\d+px solid/.test(rule.style.outline));
+    assert.ok(focus.length, 'a :focus-visible rule with an outline');
+    for (const item of [view.items()[0], view.items()[1], [...view.$('repositories').children][0]]) {
+      assert.ok(focus.some((rule) => rule.selectorText.split(',').some((selector) => item.matches(selector.replace(':focus-visible', '')))));
+    }
+  } finally {
+    view.close();
+  }
+});
