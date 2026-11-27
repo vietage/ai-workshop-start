@@ -178,6 +178,25 @@ test('file-bug: invalid input → every problem on stderr, exit 2, nothing filed
   assert.match(noBody.stderr, /--body: a Markdown file/);
 });
 
+test('file-bug: an unknown option, an option without its value or an argument → one line on stderr, exit 2, nothing filed', (t) => {
+  const files = inputs(t);
+  const cases: [string[], RegExp][] = [
+    [['--key', 'k', '--title', 't', '--body', files.body, '--vidoe', files.video, '--dry-run'], /^Unknown option '--vidoe'/],
+    [['--title', 't', '--body', files.body, '--video', files.video, '--dry-run', '--key'], /^Option '--key <value>' argument missing/],
+    [['--key', '--title', 't', '--body', files.body, '--video', files.video], /^Option '--key' argument is ambiguous/],
+    [[...args(files), 'extra'], /^Unexpected argument 'extra'/],
+  ];
+  for (const [argv, message] of cases) {
+    const out = fileBug(t, argv);
+    assert.equal(out.status, 2, argv.join(' '));
+    assert.match(out.stderr, message);
+    assert.equal(out.stderr.trim().split('\n').length, 1, out.stderr);
+    assert.doesNotMatch(out.stderr, /node:internal|ERR_PARSE_ARGS|    at /);
+    assert.equal(out.stdout, '');
+    assert.deepEqual(out.calls, []);
+  }
+});
+
 test('file-bug --dry-run: the title, labels, video name and body; nothing uploaded or filed', (t) => {
   const files = inputs(t);
   const out = fileBug(t, args(files, '--dry-run'), [], { RED_AGENT_REPO: 'owner/repo' });
