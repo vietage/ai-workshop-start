@@ -47,13 +47,13 @@ export const PAGE = `<!doctype html>
   input::placeholder { color: var(--muted); opacity: 1; }
   input:hover { border-color: var(--cyan); }
   input:focus { outline: 2px solid var(--cyan); outline-offset: 2px; border-color: var(--cyan); box-shadow: 0 0 16px #22e3e080, inset 0 0 10px #22e3e033; }
-  input:disabled { border-style: dashed; border-color: #cdbdf080; color: var(--muted); box-shadow: none; cursor: not-allowed; }
   button { padding: 9px 22px; font: inherit; font-weight: 700; border: 1px solid #ffd0ec; border-radius: 10px; background-color: #ff4fa8; background-image: linear-gradient(100deg, #ff4fa8, #ff9a3d); color: #1a0836; cursor: pointer; box-shadow: 0 0 14px #ff2e9799, 0 2px 8px #0a021f80; }
   button:hover { box-shadow: 0 0 24px #ff2e97, 0 2px 8px #0a021f80; }
   /* A clear focus from the keyboard, the same on every control. */
   button:focus-visible, a:focus-visible, #warnings:focus-visible, #tabs [role="tab"]:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
-  /* A disabled button: no neon, no glow, a dashed border. */
-  button:disabled { background-color: #3a2760; background-image: none; color: var(--muted); border-style: dashed; border-color: #cdbdf080; box-shadow: none; cursor: not-allowed; }
+  /* Stop, the button while a scan runs: not Scan's pink gradient but cyan on a dark ground, a cyan glow. */
+  #scan[type="button"] { background-color: #0a021f; background-image: none; color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 14px #22e3e099, 0 2px 8px #0a021f80; }
+  #scan[type="button"]:hover { box-shadow: 0 0 24px #22e3e0, 0 2px 8px #0a021f80; }
   #progress { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 13px; color: var(--text); }
   #progress-bar { flex: 1; max-width: 420px; height: 10px; -webkit-appearance: none; appearance: none; overflow: hidden; border: 1px solid #22e3e080; border-radius: 999px; background-color: #0a021f99; box-shadow: 0 0 10px #22e3e059; accent-color: var(--pink); }
   #progress-bar::-webkit-progress-bar { background-color: #0a021f00; }

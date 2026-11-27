@@ -112,8 +112,8 @@ of *The page* above changes. *One* look, on a dark base, whatever the system's c
   skills and the SKILL.md: rounded corners, translucent *glass* (what is behind, blurred), a soft
   neon border and shadow; under the pointer, a brighter border and shadow
 - **Controls**, in the same neon:
-  - *Scan*: a pink-to-orange gradient, dark text, a glow; *disabled*: no gradient, no glow, a
-    dashed border, the `not-allowed` cursor
+  - *Scan*: a pink-to-orange gradient, dark text, a pink glow; **Stop** (while a scan runs, *The
+    page*): clearly not *Scan*, no gradient, cyan text and border on a dark ground, a cyan glow
   - The fields: a cyan border on a dark ground; with the focus, a cyan outline and glow
   - The progress bar: rounded, cyan to pink
   - The focus from the keyboard: a cyan outline, on the button, the fields, the tabs, the

@@ -10,7 +10,7 @@
     { "caption": "The warnings, the skills and the SKILL.md: glass cards over the sunset", "pause": 3500 },
     { "click": "#skills li:nth-child(3)" },
     { "caption": "A skill selected: a neon tint and an accent bar", "pause": 2500 },
-    { "caption": "An organisation scanning: Scan disabled, without its neon and glow" },
+    { "caption": "An organisation scanning: the button is Stop, cyan on dark, not Scan's pink" },
     { "fill": "#repo" },
     { "type": "#repo", "text": "github.com/Kotlin", "pause": 300 },
     { "click": "#scan", "pause": 4000 },

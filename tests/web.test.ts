@@ -1121,14 +1121,11 @@ test('page: a neon-sunset style: the text at WCAG AA contrast on its card, whate
     // The placeholders are in the muted colour, as the header is: that colour on the field's ground.
     assert.equal(sheetRules(view).find((rule) => rule.selectorText === '#summary')!.style.color, 'var(--muted)');
     check(view.$('summary'), over(rgba(style(view.$('repo')).backgroundColor), card), 'a placeholder');
-    // The button: dark text on each colour of its gradient; disabled, on its flat ground.
+    // The button: dark text on each colour of its gradient (Stop's: in its own test).
     const scan = view.$('scan') as HTMLButtonElement;
     const stops = colours(style(scan).backgroundImage);
     assert.ok(stops.length >= 2);
     for (const stop of stops) check(scan, stop, 'Scan');
-    scan.disabled = true;
-    check(scan, over(rgba(style(scan).backgroundColor), card), 'Scan, disabled');
-    scan.disabled = false;
     // A failed scan's message, and `Scanning <repo>…`: boxes of their own, not on a card.
     await view.enter('/no/such/directory');
     assert.notEqual(view.$('error').textContent, '');
@@ -1173,7 +1170,7 @@ test('page: a neon-sunset style: an organisation\'s text and its tabs at WCAG AA
   }
 });
 
-test('page: a neon-sunset style: Scan in neon, with a glow; disabled: no gradient, no glow, a dashed border', { timeout: 5_000 }, async () => {
+test('page: a neon-sunset style: Scan in neon, with a pink glow', { timeout: 5_000 }, async () => {
   const view = await page('/');
   try {
     const scan = view.$('scan') as HTMLButtonElement;
@@ -1186,18 +1183,6 @@ test('page: a neon-sunset style: Scan in neon, with a glow; disabled: no gradien
     assert.match(style().boxShadow, /rgba\(255, 46, 151, [\d.]+\) 0px 0px [1-9]\d*px/);
     assert.equal(style().cursor, 'pointer');
     assert.equal(style().borderTopStyle, 'solid');
-    const enabled = style().backgroundColor;
-    scan.disabled = true;
-    assert.equal(style().backgroundImage, 'none');
-    assert.equal(style().boxShadow, 'none');
-    assert.equal(style().borderTopStyle, 'dashed');
-    assert.equal(style().cursor, 'not-allowed');
-    assert.notEqual(style().backgroundColor, enabled);
-    // No neon left: a ground without a strong colour.
-    const [r, g, b] = rgba(style().backgroundColor);
-    assert.ok(Math.max(r, g, b) < 130, style().backgroundColor);
-    scan.disabled = false;
-    assert.match(style().backgroundImage, /^linear-gradient\(/);
   } finally {
     view.close();
   }
@@ -2164,6 +2149,44 @@ const until = async (done: () => boolean) => {
     await new Promise((r) => setTimeout(r, 10));
   }
 };
+
+test('page: a neon-sunset style: Stop, while a scan runs, clearly not Scan: cyan on a dark ground, a cyan glow; Scan again after', { timeout: 5_000 }, async () => {
+  const held = await heldServer(0);
+  const view = await page('/', held.port);
+  const scan = view.$('scan') as HTMLButtonElement;
+  const style = () => view.dom.window.getComputedStyle(scan);
+  const cyan = ([r, g, b]: number[]) => r < 120 && g > 200 && b > 200;
+  try {
+    const looks = { image: style().backgroundImage, colour: style().color, border: style().borderTopColor, shadow: style().boxShadow };
+    (view.$('repo') as HTMLInputElement).value = FIXTURE;
+    view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+    await until(() => scan.textContent === 'Stop');
+    // No gradient, a dark ground, cyan text and border, a glow in cyan, not in pink.
+    assert.equal(style().backgroundImage, 'none');
+    const ground = rgba(style().backgroundColor);
+    assert.equal(ground[3], 1, style().backgroundColor);
+    assert.ok(Math.max(...ground.slice(0, 3)) < 60, style().backgroundColor);
+    assert.ok(cyan(rgba(style().color)), style().color);
+    assert.ok(cyan(rgba(style().borderTopColor)), style().borderTopColor);
+    assert.equal(style().borderTopStyle, 'solid');
+    assert.match(style().boxShadow, /rgba\(34, 227, 224, [\d.]+\) 0px 0px [1-9]\d*px/);
+    assert.doesNotMatch(style().boxShadow, /rgba?\(255, 46, 151/);
+    assert.equal(style().cursor, 'pointer');
+    assert.notDeepEqual({ image: style().backgroundImage, colour: style().color, border: style().borderTopColor, shadow: style().boxShadow }, looks);
+    // Its text at WCAG AA on its ground; brighter under the pointer, as Scan.
+    const ratio = contrast(rgba(style().color), ground);
+    assert.ok(ratio >= 4.5, `Stop: ${ratio.toFixed(2)}:1`);
+    const hover = sheetRules(view).filter((rule) => /:hover$/.test(rule.selectorText) && scan.matches(rule.selectorText.replace(':hover', '')));
+    assert.ok(hover.some((rule) => /rgb\(34, 227, 224\)|#22e3e0/.test(rule.style.boxShadow)), 'a cyan glow under the pointer');
+    // Stopped: Scan's look again.
+    scan.click();
+    assert.equal(scan.textContent, 'Scan');
+    assert.deepEqual({ image: style().backgroundImage, colour: style().color, border: style().borderTopColor, shadow: style().boxShadow }, looks);
+  } finally {
+    view.close();
+    held.close();
+  }
+});
 
 test('page: while an organisation scans, Stop → what has been found so far kept, the rest not scanned; Scan again', { timeout: 5_000 }, async () => {
   const held = await heldServer(3);

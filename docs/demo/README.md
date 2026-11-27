@@ -191,6 +191,6 @@ The web view on `./fixture`, then `github.com/Kotlin`, then a directory that doe
 | The empty page | the sunset gradient, the sun on the horizon, the ocean, two palms, the title in neon |
 | `./fixture` scanned | the scan form, the warnings, the skills and the SKILL.md on glass cards |
 | A skill selected | its neon tint and accent bar |
-| `github.com/Kotlin` scanning | *Scan* disabled: no gradient, no glow, a dashed border |
+| `github.com/Kotlin` scanning | the button is **Stop**: cyan on a dark ground, a cyan glow, not *Scan*'s pink |
 | A repository opened | the tabs, and the same cards in the repository's tab |
 | `./no-such-directory` | the failed scan's message in its own box |
