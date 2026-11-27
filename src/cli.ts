@@ -9,7 +9,8 @@ import { openDirectory } from './local.ts';
 import { serve } from './web.ts';
 
 const token = process.env.GITHUB_TOKEN || undefined;
-// How long a GitHub request may go unanswered, in seconds; 30 by default.
+// How long a GitHub request may go unanswered, in seconds; 30 by default, and for a value that is
+// not a number above 0. Infinity, or more than a timer holds (about 24.8 days): no limit.
 const limit = Number(process.env.SKILL_ATLAS_GITHUB_TIMEOUT);
 const timeout = limit > 0 ? limit * 1000 : undefined;
 const open = (input: string) => (parseGitHubUrl(input) ? openGitHub(input, { fetch, token, timeout }) : openDirectory(input));

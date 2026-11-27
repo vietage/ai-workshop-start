@@ -8,7 +8,7 @@ import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { progressBar, run } from '../src/commands.ts';
-import { GITHUB_TIMEOUT, openGitHub, parseGitHubOwner, parseGitHubUrl, type Fetch } from '../src/core/github.ts';
+import { GITHUB_TIMEOUT, TIMER_LIMIT, openGitHub, parseGitHubOwner, parseGitHubUrl, type Fetch } from '../src/core/github.ts';
 import { AtlasError } from '../src/core/errors.ts';
 import { scanOrganisation } from '../src/core/organisation.ts';
 import { parseSkill } from '../src/core/parse.ts';
@@ -398,6 +398,24 @@ test('GitHub does not answer → given up after 30 s by default, a clear message
   assert.equal(scanned.skills.length, 1);
 });
 
+test('a limit too long for a timer, or Infinity → no limit: an answer that comes is used, no 1 ms limit', async () => {
+  assert.equal(TIMER_LIMIT, 2 ** 31 - 1);
+  const warnings: Error[] = [];
+  const warn = (warning: Error) => warnings.push(warning);
+  process.on('warning', warn);
+  try {
+    const slow: Fetch = async (url, init) => (await new Promise((resolve) => setTimeout(resolve, 20)), github(url, init));
+    for (const timeout of [Infinity, TIMER_LIMIT + 1, 3_000_000_000, TIMER_LIMIT]) {
+      const scanned = await scan(await openGitHub('github.com/JetBrains/example', { fetch: slow, token: 'test', timeout }));
+      assert.equal(scanned.skills.length, 1, String(timeout));
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    process.off('warning', warn);
+  }
+  assert.deepEqual(warnings.filter((warning) => warning.name === 'TimeoutOverflowWarning'), []);
+});
+
 test('organisation: a repository GitHub does not answer for → not scanned, a warning; the others are listed', async () => {
   const result = await scanOrganisation('github.com/skillatlas', {
     fetch: unanswered((url) => url.includes('/SkillAtlas/alpha/')),
@@ -435,6 +453,27 @@ test('CLI: GitHub accepts the connection and never answers → a clear message, 
       assert.ok(Date.now() - started < 8_000, `${link}: ${Date.now() - started} ms`);
     }
     assert.ok(silent.connections() >= 2);
+  } finally {
+    silent.close();
+  }
+});
+
+test('CLI: SKILL_ATLAS_GITHUB_TIMEOUT=Infinity, or more than a timer holds → no limit: it waits, no message', { timeout: 20_000 }, async () => {
+  const silent = await silentGitHub();
+  try {
+    for (const seconds of ['Infinity', '3000000']) {
+      const child = spawn(process.execPath, [CLI, 'scan', 'https://github.com/vietage/lang17'], { env: silent.env(seconds) });
+      let output = '';
+      child.stdout.setEncoding('utf8').on('data', (text) => (output += text));
+      child.stderr.setEncoding('utf8').on('data', (text) => (output += text));
+      const exited = new Promise<number | null>((resolve) => child.on('close', resolve));
+      // Still waiting for GitHub after 1.5 s: not given up after 1 ms.
+      const early = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve('waiting'), 1_500))]);
+      child.kill();
+      await exited;
+      assert.equal(early, 'waiting', `${seconds}: ${output}`);
+      assert.equal(output, '', seconds);
+    }
   } finally {
     silent.close();
   }

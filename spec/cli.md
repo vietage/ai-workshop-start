@@ -10,7 +10,8 @@ URL; one argument, split on *whitespace* (`--filter "kotlin test"`), as in the w
 Prints the result **at once**; *nothing is stored*, but an organisation's *cache*.
 `GITHUB_TOKEN`, optional: a higher GitHub rate limit.
 `SKILL_ATLAS_GITHUB_TIMEOUT=<seconds>`, optional: how long a GitHub request may go unanswered;
-30 s by default, then `Cannot reach GitHub: no answer in 30 s for <url>`, exit code 1.
+30 s by default, then `Cannot reach GitHub: no answer in 30 s for <url>`, exit code 1;
+`Infinity` (or more than about 24.8 days): no limit; not a number above 0: 30 s.
 ## Output
 ```
 JetBrains/kotlin · 6 skills

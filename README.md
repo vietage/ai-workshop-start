@@ -37,7 +37,7 @@ skill count), its skills (with a field to filter them) and each one's SKILL.md, 
 light or dark as the system's colours (`--port <port>` for another port).
 
 Set `GITHUB_TOKEN` for a higher GitHub rate limit. A GitHub request that gets no answer gives up after 30 s with
-`Cannot reach GitHub: no answer in 30 s for <url>` (`SKILL_ATLAS_GITHUB_TIMEOUT=<seconds>` for another limit). `npm test` runs the tests. `npm run qa` tests the
+`Cannot reach GitHub: no answer in 30 s for <url>` (`SKILL_ATLAS_GITHUB_TIMEOUT=<seconds>` for another limit, `Infinity` for none). `npm test` runs the tests. `npm run qa` tests the
 web view in a browser, scenario by scenario, and records each one; `npm run qa:issues` files an issue
 for each failure ([qa/](qa/README.md), the [manual-qa skill](.agents/skills/manual-qa/SKILL.md)).
 `npm run e2e` runs the same scenarios in the Playwright Docker image, as CI does on every push and

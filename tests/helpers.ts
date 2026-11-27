@@ -138,7 +138,7 @@ export async function silentGitHub() {
   const { port } = server.address() as { port: number };
   return {
     /** The environment of a `./skill-atlas` that goes through it, giving up after `seconds`. */
-    env: (seconds: number) => ({
+    env: (seconds: number | string) => ({
       ...process.env,
       GITHUB_TOKEN: '',
       NODE_USE_ENV_PROXY: '1',

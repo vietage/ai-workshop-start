@@ -46,7 +46,8 @@ Skill: id = `repo:path`, name, description, commit, copies
 - A request GitHub *does not answer* (the connection accepted, then nothing; an answer that stops
   halfway; a stalled network) → given up after **30 s**, the answer and its body together:
   `Cannot reach GitHub: no answer in 30 s for <url>`, exit code 1; never a hang
-  - `SKILL_ATLAS_GITHUB_TIMEOUT=<seconds>`: another limit
+  - `SKILL_ATLAS_GITHUB_TIMEOUT=<seconds>`: another limit; `Infinity`, or more than about
+    24.8 days (2 147 483 647 ms, the longest timer): *no limit*; not a number above 0: 30 s
   - The CLI exits once its output is written, even when a connection given up on stays open
 ## Organisation
 `github.com/<org>`: every repository of an organisation, or of a user, each with its **skill count**

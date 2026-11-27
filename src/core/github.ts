@@ -9,12 +9,18 @@ export type GitHubOptions = {
   fetch: Fetch;
   /** With a token, skills are found through code search; without it, through the tree. */
   token?: string;
-  /** How long a request, its answer and its body, may take before it gives up; 30 s by default. */
+  /**
+   * How long a request, its answer and its body, may take before it gives up, in ms; 30 s by
+   * default. Longer than a timer can hold (`TIMER_LIMIT`, about 24.8 days), or `Infinity`: no limit.
+   */
   timeout?: number;
 };
 
 /** A request GitHub does not answer in time gives up: a silent GitHub or a stalled network never hangs a scan. */
 export const GITHUB_TIMEOUT = 30_000;
+
+/** The longest delay `setTimeout` keeps; a longer one fires after 1 ms instead. */
+export const TIMER_LIMIT = 2 ** 31 - 1;
 
 const API = 'https://api.github.com';
 const RAW = 'https://raw.githubusercontent.com';
@@ -186,10 +192,12 @@ function client({ fetch, token, timeout = GITHUB_TIMEOUT }: GitHubOptions) {
 
   /**
    * `work`, the request and the reading of its answer, given up after `timeout`: the signal aborts
-   * the request, and the race ends even a fetch that ignores the signal.
+   * the request, and the race ends even a fetch that ignores the signal. A limit too long for a
+   * timer is no limit.
    */
   async function timed<T>(url: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const controller = new AbortController();
+    if (!(timeout <= TIMER_LIMIT)) return work(controller.signal);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const expired = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
