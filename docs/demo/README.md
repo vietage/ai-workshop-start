@@ -15,6 +15,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [failed-scan.mp4](failed-scan.mp4) | [failed-scan.json](failed-scan.json) | a failed scan shows its message and nothing else, [#20](https://github.com/vietage/ai-workshop-start/issues/20) |
 | [organisation-cache.mp4](organisation-cache.mp4) | [organisation-cache.json](organisation-cache.json) | the cache of an organisation's scan, [#22](https://github.com/vietage/ai-workshop-start/issues/22) |
 | [nicer-skill-list.mp4](nicer-skill-list.mp4) | [nicer-skill-list.json](nicer-skill-list.json) | the gradient style, an organisation's repositories in a column, [#30](https://github.com/vietage/ai-workshop-start/issues/30) |
+| [hide-empty-repositories.mp4](hide-empty-repositories.mp4) | [hide-empty-repositories.json](hide-empty-repositories.json) | an organisation's list without its repositories with 0 skills, [#39](https://github.com/vietage/ai-workshop-start/issues/39) |
 | [repository-tabs.mp4](repository-tabs.mp4) | [repository-tabs.json](repository-tabs.json) | an organisation's repository in a tab of its own, in the page, [#37](https://github.com/vietage/ai-workshop-start/issues/37) |
 | [scan-button.mp4](scan-button.mp4) | [scan-button.json](scan-button.json) | the Scan button back to `Scan` once the latest scan ends, [#34](https://github.com/vietage/ai-workshop-start/issues/34) |
 | [long-link.mp4](long-link.mp4) | [long-link.json](long-link.json) | a link over 16 KB: its scan's message, on reload too, and the API's 400 JSON, [#46](https://github.com/vietage/ai-workshop-start/issues/46) |
@@ -87,6 +88,18 @@ The web view on `./fixture`, then the `Kotlin` organisation, on its default bran
 
 The CLI's bold names and dim links are drawn only when stdout is a terminal
 ([spec/cli.md](../../spec/cli.md)), which the recorder's terminal is not: it shows the plain text.
+
+## hide-empty-repositories
+
+The web view on the `Kotlin` organisation, on its default branches (107 repositories, 3 with
+skills), then the CLI. Recorded with a warm cache (`SKILL_ATLAS_CACHE=/tmp/skill-atlas-demo/cache.db`):
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `github.com/Kotlin`, Scan | `Kotlin · 107 repositories · 20 skills`, 3 repositories listed | 0 skills → not listed; the header counts them all |
+| `multik` selected | its 2 skills | a repository selected, as before |
+| `scan github.com/Kotlin` in the CLI | the same header, the same 3 lines | the CLI does the same ([spec/cli.md](../../spec/cli.md)) |
+| `grep -c ' — 0 skills'` | `0` | no line with 0 skills |
 
 ## repository-tabs
 

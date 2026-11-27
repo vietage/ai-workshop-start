@@ -686,10 +686,16 @@ test('API: an organisation → its repositories, each with its commit and skill 
     commit: ORGANISATION_COMMIT,
     skillCount: 2,
   });
-  // The same order, counts and warnings as the CLI; a repository that failed: no commit, no count.
+  // Every repository, those with 0 skills too (the CLI and the page leave them out): the same
+  // order, counts and warnings as the CLI; a repository that failed: no commit, no count.
+  assert.equal(body.repositories.length, 7);
+  assert.deepEqual(
+    body.repositories.filter((repository: { skillCount: number | null }) => repository.skillCount === 0).map((repository: { name: string }) => repository.name),
+    ['Docs', 'empty', 'huge'],
+  );
   const cli = await atlas(['scan', 'github.com/skillatlas']);
   assert.deepEqual(
-    body.repositories.map((repository: { name: string; skillCount: number | null }) =>
+    body.repositories.filter((repository: { skillCount: number | null }) => repository.skillCount !== 0).map((repository: { name: string; skillCount: number | null }) =>
       `${repository.name} — ${repository.skillCount === null ? 'not scanned' : `${repository.skillCount} skill${repository.skillCount === 1 ? '' : 's'}`}`),
     cli.stdout.split('\n').slice(1),
   );
@@ -716,12 +722,15 @@ test('page: an organisation link → its repositories with their counts; selecti
   try {
     await view.enter('github.com/skillatlas');
     assert.equal(view.$('organisation').hidden, false);
+    // Docs, empty and huge have 0 skills: not listed, but counted in the header; broken, not scanned,
+    // stays.
     assert.equal(view.$('org-summary').textContent, 'SkillAtlas · 7 repositories · 6 skills');
     const repositories = () => [...view.$('repositories').children] as HTMLElement[];
     assert.deepEqual(
       repositories().map((item) => [view.text(item, '.name'), view.text(item, '.count')]),
-      [['alpha', '2 skills'], ['Beta', '2 skills'], ['example-tools', '2 skills'], ['Docs', '0 skills'], ['empty', '0 skills'], ['huge', '0 skills'], ['broken', 'not scanned']],
+      [['alpha', '2 skills'], ['Beta', '2 skills'], ['example-tools', '2 skills'], ['broken', 'not scanned']],
     );
+    // Their warnings stay: huge's among them.
     assert.equal(view.$('org-warnings').children.length, 3);
     // No repository selected yet: no skills.
     assert.equal(view.$('main').hidden, true);
@@ -852,7 +861,7 @@ test('page: the URL keeps the organisation and the repository; reload shows the 
   const organisation = await page(`/?repo=${encodeURIComponent('github.com/skillatlas')}`);
   try {
     await organisation.settled(1);
-    assert.equal(organisation.$('repositories').children.length, 7);
+    assert.equal(organisation.$('repositories').children.length, 4);
     assert.equal(organisation.$('main').hidden, true);
     assert.equal(organisation.scans(), 1);
   } finally {
@@ -953,7 +962,7 @@ test('page: switching back to the organisation\'s tab, and to the repository\'s,
     assert.equal(view.$('organisation').hidden, false);
     assert.equal(view.$('main').hidden, true);
     assert.equal(view.$('org-summary').textContent, 'SkillAtlas · 7 repositories · 6 skills');
-    assert.equal(view.$('repositories').children.length, 7);
+    assert.equal(view.$('repositories').children.length, 4);
     assert.deepEqual(view.search(), { repo: 'github.com/skillatlas' });
     // The repository in its tab: still marked in the list.
     assert.deepEqual(marked(view), ['Beta']);
@@ -1113,7 +1122,7 @@ test('page: the URL keeps the active tab; reload restores it, with its skill and
     // Back to the organisation: its repositories, from the same scan.
     clickTab(reloaded, 'SkillAtlas');
     assert.equal(reloaded.$('organisation').hidden, false);
-    assert.equal(reloaded.$('repositories').children.length, 7);
+    assert.equal(reloaded.$('repositories').children.length, 4);
     assert.deepEqual(reloaded.search(), { repo: 'github.com/skillatlas' });
     assert.equal(reloaded.scans(), 2);
     // Beta was opened before the reload: not kept, scanned now.
@@ -1173,35 +1182,48 @@ test('page: a gradient style: the tabs on rounded cards, the active one tinted w
   }
 });
 
-test('page: an empty repository of the organisation selected → no skills, no error, not scanned again', { timeout: 5_000 }, async () => {
-  const view = await page('/');
-  try {
-    await view.enter('github.com/skillatlas');
-    const empty = [...view.$('repositories').children].find((item) => (item as HTMLElement).dataset.name === 'empty') as HTMLElement;
-    const scans = view.scans();
-    empty.dispatchEvent(new view.dom.window.Event('click'));
-    await view.settled(scans);
-    assert.equal(view.scans(), scans);
-    assert.equal(empty.getAttribute('aria-selected'), 'true');
-    assert.equal(view.$('error').textContent, '');
-    assert.equal(view.$('main').hidden, false);
-    assert.equal(view.$('summary').textContent, 'SkillAtlas/empty · 0 skills');
-    assert.deepEqual(view.items(), []);
-    assert.equal(view.$('skill').textContent, 'No skills in this repository.');
-    assert.deepEqual(view.search(), { repo: 'github.com/skillatlas', repository: 'empty' });
-  } finally {
-    view.close();
+test('page: repositories with 0 skills not listed; one in the URL → the organisation, none selected', { timeout: 5_000 }, async () => {
+  for (const name of ['empty', 'Docs']) {
+    const view = await page(`/?repo=${encodeURIComponent('github.com/skillatlas')}&repository=${name}`);
+    try {
+      await view.settled(1);
+      assert.equal(view.scans(), 1);
+      assert.equal(view.$('organisation').hidden, false);
+      assert.deepEqual(tabNames(view), ['SkillAtlas']);
+      assert.equal(activeTab(view), 'SkillAtlas');
+      assert.ok(![...view.$('repositories').children].some((item) => (item as HTMLElement).dataset.name === name), name);
+      assert.equal(view.$('error').textContent, '');
+      assert.equal(view.$('main').hidden, true);
+      assert.deepEqual(view.search(), { repo: 'github.com/skillatlas' });
+    } finally {
+      view.close();
+    }
   }
-  // Reload: the same.
-  const reloaded = await page(`/?repo=${encodeURIComponent('github.com/skillatlas')}&repository=empty`);
+});
+
+test('page: every repository with 0 skills → none listed, the header counts them all, no error', { timeout: 5_000 }, async () => {
+  // Every repository with 0 skills: none listed, no error.
+  const quiet = {
+    organisation: { name: 'quiet', url: 'https://github.com/quiet' },
+    repositories: ['a', 'b'].map((name) => ({ name, url: `https://github.com/quiet/${name}`, commit: ORGANISATION_COMMIT, skillCount: 0 })),
+    skills: 0,
+    warnings: [],
+  };
+  const empty = await serve({ open, scanOrganisation: async () => quiet, port: 0 });
+  const at = new URL(empty.url).port;
+  const other = await page('/', at);
   try {
-    await reloaded.settled(1);
-    assert.equal(reloaded.scans(), 1);
-    assert.equal(reloaded.$('error').textContent, '');
-    assert.equal(reloaded.$('summary').textContent, 'SkillAtlas/empty · 0 skills');
-    assert.equal(reloaded.$('skill').textContent, 'No skills in this repository.');
+    await other.enter('github.com/quiet');
+    assert.equal(other.$('org-summary').textContent, 'quiet · 2 repositories · 0 skills');
+    assert.equal(other.$('repositories').children.length, 0);
+    assert.equal(other.$('error').textContent, '');
+    assert.equal(other.$('main').hidden, true);
+    // The API: every repository, with its count.
+    const body = await (await fetch(`http://127.0.0.1:${at}/api/scan?repo=github.com/quiet`)).json();
+    assert.deepEqual(body.repositories.map((repository: { skillCount: number }) => repository.skillCount), [0, 0]);
   } finally {
-    reloaded.close();
+    other.close();
+    empty.server.close();
   }
 });
 

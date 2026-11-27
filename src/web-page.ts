@@ -143,6 +143,9 @@ let scanning;
 // only, not for an earlier one it replaced, which may never finish.
 let latest;
 const plural = (count, one, many) => count + ' ' + (count === 1 ? one : many);
+// The same rule as listedRepositories in src/core/organisation.ts: every repository but those
+// scanned with no skills; the ones not scanned stay.
+const listed = () => organisation.repositories.filter((entry) => entry.skillCount !== 0);
 
 // The same rule as filterSkills in src/core/model.ts: the name or the description contains every
 // word, each in any case, in any order.
@@ -255,7 +258,7 @@ function scan(repo, skill, name, filter) {
         organisation = body;
         result = undefined;
         showOrganisation();
-        if (organisation.repositories.some((entry) => entry.name === name)) return await openRepository(name, skill, filter);
+        if (listed().some((entry) => entry.name === name)) return await openRepository(name, skill, filter);
         return activate(undefined);
       }
       $('organisation').hidden = true;
@@ -278,7 +281,10 @@ function failed(error) {
   $('error').textContent = error.message;
 }
 
-/** The organisation: its repositories, each with its skill count, and its warnings. */
+/**
+ * The organisation: all its repositories counted; each one with its skill count, the ones with no
+ * skills left out; and its warnings.
+ */
 function showOrganisation() {
   const shown = organisation;
   const { organisation: owner, repositories, skills, warnings } = shown;
@@ -287,7 +293,7 @@ function showOrganisation() {
     element('strong', '', owner.name),
     ' · ' + plural(repositories.length, 'repository', 'repositories') + ' · ' + plural(skills, 'skill', 'skills'),
   );
-  $('repositories').replaceChildren(...repositories.map((entry) => {
+  $('repositories').replaceChildren(...listed().map((entry) => {
     const item = element('li');
     item.setAttribute('role', 'option');
     item.setAttribute('aria-selected', 'false');
@@ -316,12 +322,7 @@ async function openRepository(name, skill, filter = '') {
   const state = { name, selected: skill, filter };
   opened.set(name, state);
   tab = state;
-  // Empty, without a commit: nothing to scan, and no skills, as its count says.
-  if (!entry.commit && entry.skillCount === 0) {
-    state.result = { repository: { id: entry.url.replace('https://github.com/', '') }, skills: [], total: 0, warnings: [] };
-  }
   activate(state);
-  if (state.result) return;
   try {
     state.result = await request(entry.commit ? entry.url + '/tree/' + entry.commit : entry.url);
   } catch (error) {
