@@ -1,0 +1,19 @@
+{
+  "serve": true,
+  "typingDelay": 60,
+  "steps": [
+    { "caption": "An organisation: Kotlin, 107 repositories; only 3 have skills" },
+    { "goto": "/" },
+    { "type": "#repo", "text": "github.com/Kotlin" },
+    { "click": "#scan" },
+    { "waitFor": "#org-summary strong", "timeout": 120000, "pause": 1500 },
+    { "caption": "Repositories with 0 skills are not listed; the header still counts all 107", "pause": 4000 },
+    { "caption": "Select one: its skills, as before" },
+    { "click": "#repositories li:nth-child(2)" },
+    { "waitFor": "#skills li", "pause": 3000 },
+    { "caption": "The CLI does the same: all 107 counted, only the 3 with skills listed" },
+    { "run": "./skill-atlas scan github.com/Kotlin", "pause": 3500 },
+    { "caption": "No line with 0 skills: none listed" },
+    { "run": "./skill-atlas scan github.com/Kotlin | grep -c ' — 0 skills' || true", "pause": 3000 }
+  ]
+}

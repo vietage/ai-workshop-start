@@ -58,6 +58,8 @@ Skill: id = `repo:path`, name, description, commit, copies
   not JSON, an unexpected one) → a *warning*, `<repo>: not scanned: <message>`; the scan goes on;
   it is listed **last**, with *no count* and no commit
 - An empty repository → *0 skills*, no warning
+- The output keeps *every* repository, those with 0 skills too; the CLI and the web page leave
+  them out of the list (`spec/cli.md`, `spec/web.md`)
 - **Progress**: `scanned` of `total` repositories, the archived ones and forks not counted; *0 of N*
   once listed, then one more as each repository is done, whatever its outcome, the failed ones too;
   nothing before the list (an unknown organisation)
