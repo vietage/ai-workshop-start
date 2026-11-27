@@ -871,6 +871,63 @@ test('page: a repository of the organisation that fails → its message; the org
   }
 });
 
+test('page: a repository the organisation could not scan, selected and scanned → its own warnings, not `not scanned`', { timeout: 10_000 }, async () => {
+  // The organisation's scan, then a stand-in where example-tools (a malformed SKILL.md) was not scanned.
+  const real = await page('/');
+  let expected: string[];
+  try {
+    await real.enter('github.com/skillatlas');
+    expected = [...real.$('warnings').children].map((item) => item.textContent!);
+    assert.equal(expected.filter((warning) => warning.startsWith('example-tools: ')).length, 1);
+    assert.match(expected[0], /^example-tools: .*malformed front matter/);
+    // Scanned by the organisation: selected, its warnings are not listed twice.
+    const scans = real.scans();
+    const tools = [...real.$('repositories').children].find((item) => (item as HTMLElement).dataset.name === 'example-tools') as HTMLElement;
+    tools.dispatchEvent(new real.dom.window.Event('click'));
+    await real.settled(scans + 1);
+    assert.deepEqual([...real.$('warnings').children].map((item) => item.textContent), expected);
+  } finally {
+    real.close();
+  }
+  const notScanned = 'example-tools: not scanned: GitHub rate limit reached; try again in a minute';
+  const stand = await serve({
+    open,
+    port: 0,
+    async scanOrganisation(input, progress) {
+      const result = await scanOrganisation(input, progress);
+      return {
+        ...result,
+        repositories: result.repositories.map((entry) => (entry.name === 'example-tools' ? { ...entry, skillCount: undefined } : entry)),
+        warnings: result.warnings.map((warning) => (warning.startsWith('example-tools: ') ? notScanned : warning)),
+      };
+    },
+  });
+  const view = await page('/', new URL(stand.url).port);
+  try {
+    await view.enter('github.com/skillatlas');
+    const warnings = () => [...view.$('warnings').children].map((item) => item.textContent);
+    assert.deepEqual(warnings(), [notScanned, ...expected.slice(1)]);
+    const repositories = () => [...view.$('repositories').children] as HTMLElement[];
+    const click = async (name: string) => {
+      const scans = view.scans();
+      repositories().find((item) => item.dataset.name === name)!.dispatchEvent(new view.dom.window.Event('click'));
+      await view.settled(scans + 1);
+    };
+    await click('example-tools');
+    assert.deepEqual(view.names(), ['release', 'review']);
+    // Its own scan's warning, where its line was; no `not scanned` for it; the others as they were.
+    assert.deepEqual(warnings(), expected);
+    assert.equal(view.$('problems-title').textContent, `${expected.length} warnings`);
+    // Another repository selected: the organisation's warnings as its scan gave them.
+    await click('alpha');
+    assert.deepEqual(warnings(), [notScanned, ...expected.slice(1)]);
+  } finally {
+    view.close();
+    stand.server.closeAllConnections();
+    stand.server.close();
+  }
+});
+
 test('page: an empty repository of the organisation selected → no skills, no error, not scanned again', { timeout: 5_000 }, async () => {
   const view = await page('/');
   try {

@@ -251,14 +251,29 @@ function failed(error) {
 }
 
 /**
- * The scan's errors and warnings, in their own area: the organisation's while one is shown (they
- * include each repository's), else the repository's; none after a failed scan of a link.
+ * The scan's errors and warnings, in their own area: the organisation's while one is shown, else
+ * the repository's; none after a failed scan of a link.
  */
 function showWarnings() {
-  const warnings = organisation ? organisation.warnings : result ? result.warnings : [];
+  const warnings = organisation ? organisationWarnings() : result ? result.warnings : [];
   $('problems').hidden = !warnings.length;
   $('problems-title').textContent = plural(warnings.length, 'warning', 'warnings');
   $('warnings').replaceChildren(...warnings.map((warning) => element('li', '', warning)));
+}
+
+/**
+ * The organisation's warnings, each repository's as \`<name>: <warning>\`. A repository selected and
+ * scanned: its lines are those of its own scan, where they were (at the end if it had none), so
+ * that a \`not scanned\` line of the organisation's scan goes once it scans.
+ */
+function organisationWarnings() {
+  if (!repository || !result) return organisation.warnings;
+  const prefix = repository + ': ';
+  const own = result.warnings.map((warning) => prefix + warning);
+  const at = organisation.warnings.findIndex((warning) => warning.startsWith(prefix));
+  const others = organisation.warnings.filter((warning) => !warning.startsWith(prefix));
+  if (at === -1) return [...others, ...own];
+  return [...others.slice(0, at), ...own, ...others.slice(at)];
 }
 
 /** The organisation: its repositories, each with its skill count; its warnings apart. */

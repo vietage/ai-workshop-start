@@ -28,8 +28,11 @@
   - Unknown organisation → its message, nothing else
 - The **errors and warnings** of a scan in their *own area*, apart from the repositories and
   skills: under the organisation, above the skills; `N warnings`, then one a line
-  - An organisation's: while it is shown, its repositories' (a failed one's too), also with a
-    repository selected; else the repository's; none → no area
+  - An organisation's: while it is shown, its repositories' (a failed one's too), each as
+    `<name>: <warning>`, also with a repository selected; else the repository's; none → no area
+  - A repository of the organisation selected and scanned → its lines are its own scan's warnings,
+    `<name>: <warning>`, where its lines were (at the end if it had none); a `not scanned` line for it
+    is gone once it scans; it fails → the organisation's as they were
   - A *limited height*: the list grows to at most 160px, and scrolls when it doesn't fit; the
     area never grows past its title and that list
 - A failed scan → its message, nothing else
