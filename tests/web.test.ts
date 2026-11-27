@@ -1058,7 +1058,11 @@ async function heldServer(scanned: number) {
     holding: () => holding,
     hold: () => (held = true),
     release: () => (held = false),
-    close: () => server.close(),
+    // Its open requests too: a scan not aborted would keep the test running.
+    close: () => {
+      server.close();
+      server.closeAllConnections();
+    },
   };
 }
 
@@ -1153,6 +1157,38 @@ test('page: Stop before an organisation\'s repositories are listed, or on a repo
     await view.enter(FIXTURE);
     assert.match(view.$('summary').textContent!, / · 4 skills$/);
     assert.equal(button.textContent, 'Scan');
+  } finally {
+    view.close();
+    held.close();
+  }
+});
+
+test('page: another link entered while an organisation scans → the earlier scan aborted, it shows nothing more', { timeout: 5_000 }, async () => {
+  const held = await heldServer(3);
+  const view = await page('/', held.port);
+  const button = view.$('scan') as HTMLButtonElement;
+  try {
+    (view.$('repo') as HTMLInputElement).value = 'github.com/skillatlas';
+    view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+    await until(() => view.$('progress-text').textContent === '3 of 7 repositories scanned');
+    assert.equal(held.signals[0].aborted, false);
+    // Enter in the field, Stop showing: the link entered is scanned, the earlier one aborted.
+    held.release();
+    await view.enter(FIXTURE);
+    assert.match(view.$('summary').textContent!, / · 4 skills$/);
+    assert.deepEqual([button.textContent, button.type], ['Scan', 'submit']);
+    assert.equal(view.$('progress').hidden, true);
+    assert.equal(view.$('organisation').hidden, true);
+    assert.equal(view.$('error').textContent, '');
+    assert.equal(view.search().repo, FIXTURE);
+    // The server stops the earlier scan: its signal aborted, no request to GitHub after it.
+    await until(() => held.signals[0].aborted);
+    const requested = held.urls.length;
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(held.urls.length, requested);
+    assert.equal(held.urls.some((url) => /SkillAtlas\/(Beta|broken|empty)\b/.test(url)), false);
+    assert.equal(view.$('organisation').hidden, true);
+    assert.match(view.$('summary').textContent!, / · 4 skills$/);
   } finally {
     view.close();
     held.close();
