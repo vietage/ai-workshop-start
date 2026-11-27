@@ -32,7 +32,8 @@
     `<name>: <warning>`, also with a repository selected; else the repository's; none → no area
   - A repository of the organisation selected and scanned → its lines are its own scan's warnings,
     `<name>: <warning>`, where its lines were (at the end if it had none); a `not scanned` line for it
-    is gone once it scans; it fails → the organisation's as they were
+    is gone once it scans; while its scan is under way (the filter used meanwhile too), or it
+    fails → the organisation's as they were
   - A *limited height*: the list grows to at most 160px, and scrolls when it doesn't fit; the
     area never grows past its title and that list
 - A failed scan → its message, nothing else

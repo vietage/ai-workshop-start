@@ -928,6 +928,31 @@ test('page: a repository the organisation could not scan, selected and scanned �
   }
 });
 
+test('page: the filter used while another repository of the organisation scans → the organisation\'s warnings as they were', { timeout: 10_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    const warnings = () => [...view.$('warnings').children].map((item) => item.textContent);
+    const expected = warnings();
+    const click = (name: string) => ([...view.$('repositories').children] as HTMLElement[])
+      .find((item) => item.dataset.name === name)!.dispatchEvent(new view.dom.window.Event('click'));
+    let scans = view.scans();
+    click('example-tools');
+    await view.settled(scans + 1);
+    assert.deepEqual(warnings(), expected);
+    // alpha's scan under way: the previous repository's warnings are not shown again under alpha's name.
+    scans = view.scans();
+    click('alpha');
+    view.filter('r');
+    assert.deepEqual(warnings(), expected);
+    assert.equal(warnings().filter((warning) => warning!.startsWith('alpha: ')).length, 0);
+    await view.settled(scans + 1);
+    assert.deepEqual(warnings(), expected);
+  } finally {
+    view.close();
+  }
+});
+
 test('page: an empty repository of the organisation selected → no skills, no error, not scanned again', { timeout: 5_000 }, async () => {
   const view = await page('/');
   try {

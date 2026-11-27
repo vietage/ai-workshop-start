@@ -264,10 +264,13 @@ function showWarnings() {
 /**
  * The organisation's warnings, each repository's as \`<name>: <warning>\`. A repository selected and
  * scanned: its lines are those of its own scan, where they were (at the end if it had none), so
- * that a \`not scanned\` line of the organisation's scan goes once it scans.
+ * that a \`not scanned\` line of the organisation's scan goes once it scans; the organisation's as
+ * they were while its scan is under way.
  */
 function organisationWarnings() {
-  if (!repository || !result) return organisation.warnings;
+  // Only the selected repository's own scan: while it is under way, \`result\` is still the previous one's.
+  const entry = organisation.repositories.find((candidate) => candidate.name === repository);
+  if (!entry || !result || result.repository.id !== entry.url.replace('https://github.com/', '')) return organisation.warnings;
   const prefix = repository + ': ';
   const own = result.warnings.map((warning) => prefix + warning);
   const at = organisation.warnings.findIndex((warning) => warning.startsWith(prefix));
