@@ -248,6 +248,36 @@ test('npm run qa: every scenario, its screenshots not compared; QA_SCREENSHOTS=1
   assert.match(compared.stdout + compared.stderr, /QA_SCREENSHOTS=1 compares the screenshots only in the Docker image, at \/work.*npm run e2e/);
 });
 
+test('a run: an HTML report in qa/results/<run>/report/; the screenshots stable: the viewport, colours, language, time zone, no animations or caret', async () => {
+  // The config as Playwright reads it, without QA_SCREENSHOTS and with a run id of its own; the
+  // environment as it was afterwards, so that its `QA_RUN_ID ??=` reaches no other test.
+  const saved = { QA_SCREENSHOTS: process.env.QA_SCREENSHOTS, QA_RUN_ID: process.env.QA_RUN_ID };
+  process.env.QA_SCREENSHOTS = '';
+  process.env.QA_RUN_ID = `test-config-${process.pid}`;
+  let config;
+  try {
+    config = (await import('../qa/playwright.config.ts')).default;
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+  const results = join(QA, 'results', `test-config-${process.pid}`);
+  assert.ok(Array.isArray(config.reporter));
+  assert.deepEqual(config.reporter.find(([name]) => name === 'html'), ['html', { outputFolder: `${results}/report`, open: 'never' }]);
+  assert.ok(config.reporter.some(([name]) => name === 'json'), 'no report.json for qa:issues');
+  const { viewport, deviceScaleFactor, colorScheme, locale, timezoneId } = config.use ?? {};
+  assert.deepEqual({ viewport, deviceScaleFactor, colorScheme, locale, timezoneId },
+    { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, colorScheme: 'light', locale: 'en-US', timezoneId: 'UTC' });
+  assert.equal(config.expect?.toHaveScreenshot?.animations, 'disabled');
+  assert.equal(config.expect?.toHaveScreenshot?.caret, 'hide');
+  // No tolerance beyond Playwright's default, and the screenshots compared only with QA_SCREENSHOTS=1.
+  assert.equal(config.expect?.toHaveScreenshot?.maxDiffPixels, undefined);
+  assert.equal(config.expect?.toHaveScreenshot?.maxDiffPixelRatio, undefined);
+  assert.equal(config.ignoreSnapshots, true);
+});
+
 test('npm run e2e: the official Playwright image of the installed @playwright/test, the scenarios compared in /work', () => {
   const lock = JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8'));
   const installed = JSON.parse(readFileSync(join(ROOT, 'node_modules/@playwright/test/package.json'), 'utf8')).version;
