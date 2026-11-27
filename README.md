@@ -34,7 +34,9 @@ the cache, and a missing or broken one never fails a scan. One repository's scan
 Or in a browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
 for the repository or organisation link (an organisation's repositories in a column, each with its
 skill count), its skills (with a field to filter them) and each one's SKILL.md, in a gradient style,
-light or dark as the system's colours (`--port <port>` for another port).
+light or dark as the system's colours (`--port <port>` for another port). While a scan runs, the
+*Scan* button is **Stop**: it stops the scan, on the server too, and keeps what has been found so far,
+an organisation's repositories already scanned with their counts, the rest `not scanned`.
 
 Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests. `npm run qa` tests the
 web view in a browser, scenario by scenario, and records each one; `npm run qa:issues` files an issue

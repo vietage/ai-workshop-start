@@ -15,6 +15,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [failed-scan.mp4](failed-scan.mp4) | [failed-scan.json](failed-scan.json) | a failed scan shows its message and nothing else, [#20](https://github.com/vietage/ai-workshop-start/issues/20) |
 | [organisation-cache.mp4](organisation-cache.mp4) | [organisation-cache.json](organisation-cache.json) | the cache of an organisation's scan, [#22](https://github.com/vietage/ai-workshop-start/issues/22) |
 | [nicer-skill-list.mp4](nicer-skill-list.mp4) | [nicer-skill-list.json](nicer-skill-list.json) | the gradient style, an organisation's repositories in a column, [#30](https://github.com/vietage/ai-workshop-start/issues/30) |
+| [stop-scan.mp4](stop-scan.mp4) | [stop-scan.json](stop-scan.json) | Stop a running scan, keeping what has been found so far, [#38](https://github.com/vietage/ai-workshop-start/issues/38) |
 
 ## word-filter
 
@@ -84,3 +85,15 @@ The web view on `./fixture`, then the `Kotlin` organisation, on its default bran
 
 The CLI's bold names and dim links are drawn only when stdout is a terminal
 ([spec/cli.md](../../spec/cli.md)), which the recorder's terminal is not: it shows the plain text.
+
+## stop-scan
+
+The web view on the `Kotlin` organisation, on its default branches (107 repositories), with a cache
+of its own, removed first (`SKILL_ATLAS_CACHE=/tmp/stop-demo/cache.db`):
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `github.com/Kotlin`, Scan | the button is **Stop**, the progress bar fills | Stop while a scan runs |
+| Stop, at 57 of 107 | `Kotlin · 107 repositories · 3 skills`, the rest `not scanned`, no bar, **Scan** | what has been found so far is kept |
+| a repository not scanned, selected | its skills, scanned now | a not scanned repository can still be opened |
+| Scan again | every repository with its count, 20 skills | scan again afterwards works; the cache keeps the stopped scan's |

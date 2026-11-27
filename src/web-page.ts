@@ -123,8 +123,9 @@ let organisation;
 let repository;
 // The latest scan of a link entered: only its progress is shown.
 let scanning;
-// Scans under way: the Scan button waits for all of them.
-let pending = 0;
+// The latest scan, a link's or a repository's of the organisation, while it runs: the Scan button
+// is Stop, and stops it.
+let running;
 const plural = (count, one, many) => count + ' ' + (count === 1 ? one : many);
 
 // The same rule as filterSkills in src/core/model.ts: the name or the description contains every
@@ -145,19 +146,19 @@ function setUrl(repo, skill) {
 }
 
 /** The scan of a link: the API's answer, or its message as an error. */
-async function request(link) {
-  const response = await fetch('/api/scan?repo=' + encodeURIComponent(link));
+async function request(link, signal) {
+  const response = await fetch('/api/scan?repo=' + encodeURIComponent(link), { signal });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error);
   return body;
 }
 
 /**
- * The same, streamed: \`progress(scanned, total)\` as an organisation's repositories are done, then
- * the answer; one JSON object a line.
+ * The same, streamed: \`progress(line)\` as an organisation's repositories are done, then the answer;
+ * one JSON object a line.
  */
-async function requestWithProgress(link, progress) {
-  const response = await fetch('/api/scan?stream=1&repo=' + encodeURIComponent(link));
+async function requestWithProgress(link, signal, progress) {
+  const response = await fetch('/api/scan?stream=1&repo=' + encodeURIComponent(link), { signal });
   if (!response.ok) throw new Error((await response.json()).error);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -171,7 +172,7 @@ async function requestWithProgress(link, progress) {
       const body = JSON.parse(line);
       if (body.error !== undefined) throw new Error(body.error);
       if (body.result) return body.result;
-      progress(body.progress.scanned, body.progress.total);
+      progress(body);
     }
     if (done) throw new Error('The scan ended without an answer');
   }
@@ -186,43 +187,108 @@ function showProgress(scanned, total) {
   $('progress-text').textContent = scanned + ' of ' + plural(total, 'repository', 'repositories') + ' scanned';
 }
 
-/** Runs a scan with the Scan button disabled until every scan under way is done. */
+/**
+ * The Scan button, or Stop while a scan runs: then not the form's submit button, so Enter in the
+ * field still scans the link entered, and only a click stops.
+ */
+function scanButton(stop) {
+  $('scan').type = stop ? 'button' : 'submit';
+  $('scan').textContent = stop ? 'Stop' : 'Scan';
+}
+
+/**
+ * Runs the latest scan, the button Stop until it ends; \`work(run)\` sets \`run.stopped\`, what Stop
+ * shows. The scan before it, if still running, is aborted: it shows nothing more.
+ */
 async function busy(work) {
-  pending++;
-  $('scan').disabled = true;
-  $('scan').textContent = 'Scanning…';
+  running?.controller.abort();
+  const run = { controller: new AbortController(), stopped() {} };
+  running = run;
+  scanButton(true);
   try {
-    await work();
+    await work(run);
   } finally {
-    if (--pending === 0) {
-      $('scan').disabled = false;
-      $('scan').textContent = 'Scan';
+    if (running === run) {
+      running = undefined;
+      scanButton(false);
     }
   }
+}
+
+/** Stop: the scan's request aborted, what it has found so far shown, and the button Scan again. */
+function stop() {
+  const run = running;
+  if (!run) return;
+  running = undefined;
+  scanButton(false);
+  run.stopped();
+  run.controller.abort();
+}
+
+/** By skill count, the most first, then by name in any case; not scanned last: sortRepositories in src/core/organisation.ts. */
+function sortRepositories(repositories) {
+  const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const count = (entry) => entry.skillCount ?? -1;
+  return [...repositories].sort(
+    (a, b) => count(b) - count(a) || compare(a.name.toLowerCase(), b.name.toLowerCase()) || compare(a.name, b.name),
+  );
+}
+
+/**
+ * An organisation's scan stopped: the repositories done so far with their counts and warnings, the
+ * others not scanned, as the API's answer would have them.
+ */
+function partialOrganisation(listed, done) {
+  const repositories = sortRepositories(listed.repositories.map((entry) => done.get(entry.name)?.repository ?? entry));
+  return {
+    organisation: listed.organisation,
+    repositories,
+    skills: repositories.reduce((sum, entry) => sum + (entry.skillCount ?? 0), 0),
+    warnings: repositories.flatMap((entry) => done.get(entry.name)?.warnings ?? []),
+  };
 }
 
 /** A link entered: a repository, or an organisation and, if \`name\` is one of them, that repository. */
 function scan(repo, skill, name) {
   // This scan, to tell it from a later one of the same link.
   const current = {};
-  return busy(async () => {
+  return busy(async (run) => {
     $('error').textContent = '';
     scanned = repo;
     scanning = current;
     organisation = undefined;
     repository = undefined;
     showProgress();
+    // An organisation's repositories once listed, and each one done: what Stop keeps.
+    let listed;
+    const done = new Map();
+    run.stopped = () => {
+      scanning = undefined;
+      result = undefined;
+      showProgress();
+      $('main').hidden = true;
+      if (listed) {
+        organisation = partialOrganisation(listed, done);
+        showOrganisation();
+      } else $('organisation').hidden = true;
+      setUrl(repo);
+    };
     try {
       // The whole repository: the filter narrows it here, as you type, without scanning again.
       // An organisation: the progress bar while its repositories are scanned.
-      const body = await requestWithProgress(repo, (done, total) => scanning === current && showProgress(done, total));
+      const body = await requestWithProgress(repo, run.controller.signal, (line) => {
+        if (scanning !== current) return;
+        if (line.repositories) listed = line;
+        if (line.repository) done.set(line.repository.name, line);
+        showProgress(line.progress.scanned, line.progress.total);
+      });
       if (scanning !== current) return;
       showProgress();
       if (body.organisation) {
         organisation = body;
         result = undefined;
         showOrganisation();
-        if (organisation.repositories.some((entry) => entry.name === name)) return await openRepository(name, skill);
+        if (organisation.repositories.some((entry) => entry.name === name)) return await openRepository(name, skill, run);
         $('main').hidden = true;
         setUrl(repo);
         return;
@@ -262,16 +328,26 @@ function showOrganisation() {
     item.dataset.name = entry.name;
     const count = entry.skillCount === null ? 'not scanned' : plural(entry.skillCount, 'skill', 'skills');
     item.append(element('span', 'name', entry.name), element('span', 'count', count));
-    item.addEventListener('click', () => busy(() => openRepository(entry.name)));
+    item.addEventListener('click', () => busy((run) => openRepository(entry.name, undefined, run)));
     return item;
   }));
   $('org-warnings').replaceChildren(...warnings.map((warning) => element('li', '', warning)));
 }
 
-/** One repository of the organisation: its skills, as for a repository link, at the commit counted. */
-async function openRepository(name, skill) {
+/**
+ * One repository of the organisation: its skills, as for a repository link, at the commit counted.
+ * Stopped: the organisation, no repository selected.
+ */
+async function openRepository(name, skill, run) {
   const entry = organisation.repositories.find((candidate) => candidate.name === name);
   repository = name;
+  run.stopped = () => {
+    repository = undefined;
+    result = undefined;
+    for (const item of $('repositories').children) item.setAttribute('aria-selected', 'false');
+    $('main').hidden = true;
+    setUrl(scanned);
+  };
   for (const item of $('repositories').children) item.setAttribute('aria-selected', String(item.dataset.name === name));
   $('error').textContent = '';
   // Empty, without a commit: nothing to scan, and no skills, as its count says.
@@ -281,7 +357,7 @@ async function openRepository(name, skill) {
   }
   const current = organisation;
   try {
-    const body = await request(entry.commit ? entry.url + '/tree/' + entry.commit : entry.url);
+    const body = await request(entry.commit ? entry.url + '/tree/' + entry.commit : entry.url, run.controller.signal);
     if (organisation !== current || repository !== name) return;
     result = body;
     show(skill);
@@ -341,6 +417,12 @@ $('filter').addEventListener('input', () => {
   // After a failed scan there is nothing to narrow, but the URL still keeps the word.
   if (result) show(selected);
   else setUrl(scanned);
+});
+
+$('scan').addEventListener('click', (event) => {
+  if (!running) return;
+  event.preventDefault();
+  stop();
 });
 
 $('form').addEventListener('submit', (event) => {

@@ -9,10 +9,12 @@ import { openDirectory } from './local.ts';
 import { serve } from './web.ts';
 
 const token = process.env.GITHUB_TOKEN || undefined;
-const open = (input: string) => (parseGitHubUrl(input) ? openGitHub(input, { fetch, token }) : openDirectory(input));
+// `signal` (the web view's stopped scan) aborts the requests to GitHub.
+const open = (input: string, signal?: AbortSignal) =>
+  parseGitHubUrl(input) ? openGitHub(input, { fetch: (url, init) => fetch(url, { ...init, signal }), token }) : openDirectory(input);
 // The repositories already scanned are kept in a SQLite file, for the CLI and the web view alike.
-const scanOrganisation = (input: string, progress?: Progress, refresh?: boolean) =>
-  scanOwner(input, { fetch, token, progress, refresh, cache: () => openCache() });
+const scanOrganisation = (input: string, progress?: Progress, refresh?: boolean, signal?: AbortSignal) =>
+  scanOwner(input, { fetch, token, progress, refresh, signal, cache: () => openCache() });
 // A progress bar only on a terminal: redrawn on one line, erased when done; piped stderr gets nothing.
 let drawn = false;
 const progress = process.stderr.isTTY

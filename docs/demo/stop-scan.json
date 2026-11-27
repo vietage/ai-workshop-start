@@ -1,0 +1,20 @@
+{
+  "serve": true,
+  "steps": [
+    { "goto": "/", "pause": 800 },
+    { "caption": "Scan all repositories of an organisation" },
+    { "type": "#repo", "text": "github.com/Kotlin", "pause": 400 },
+    { "click": "#scan", "pause": 600 },
+    { "caption": "While it scans, the button is Stop", "pause": 7000 },
+    { "caption": "Stop: the repositories scanned so far keep their counts" },
+    { "click": "#scan", "pause": 2500 },
+    { "caption": "The rest are not scanned; no progress bar, the button is Scan again", "pause": 3500 },
+    { "caption": "A repository not scanned, selected: scanned now" },
+    { "click": "#repositories li:last-child" },
+    { "waitFor": "#summary strong", "timeout": 60000, "pause": 2500 },
+    { "caption": "Scan again: the whole organisation" },
+    { "click": "#scan" },
+    { "waitFor": "#scan:text-is('Scan')", "timeout": 120000 },
+    { "caption": "Every repository with its count", "pause": 3000 }
+  ]
+}
