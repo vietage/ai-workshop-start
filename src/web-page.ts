@@ -197,9 +197,9 @@ let tab;
 let active;
 // The latest scan of a link entered: only its progress is shown.
 let scanning;
-// The latest scan started, a link entered or a repository opened: the Scan button waits for it
-// only, not for an earlier one it replaced, which may never finish.
-let latest;
+// The latest scan started, a link entered or a repository opened, while it runs: the Scan button is
+// Stop, and stops it; it follows this one only, not an earlier one it replaced, which may never finish.
+let running;
 const plural = (count, one, many) => count + ' ' + (count === 1 ? one : many);
 // The same rule as listedRepositories in src/core/organisation.ts: every repository but those
 // scanned with no skills; the ones not scanned stay.
@@ -264,18 +264,18 @@ async function failure(response) {
 }
 
 /** The scan of a link: the API's answer, or its message as an error. */
-async function request(link) {
-  const response = await fetch('/api/scan?repo=' + encodeURIComponent(link));
+async function request(link, signal) {
+  const response = await fetch('/api/scan?repo=' + encodeURIComponent(link), { signal });
   if (!response.ok) throw await failure(response);
   return response.json();
 }
 
 /**
- * The same, streamed: \`progress(scanned, total)\` as an organisation's repositories are done, then
- * the answer; one JSON object a line.
+ * The same, streamed: \`progress(line)\` as an organisation's repositories are done, then the answer;
+ * one JSON object a line.
  */
-async function requestWithProgress(link, progress) {
-  const response = await fetch('/api/scan?stream=1&repo=' + encodeURIComponent(link));
+async function requestWithProgress(link, signal, progress) {
+  const response = await fetch('/api/scan?stream=1&repo=' + encodeURIComponent(link), { signal });
   if (!response.ok) throw await failure(response);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -289,7 +289,7 @@ async function requestWithProgress(link, progress) {
       const body = JSON.parse(line);
       if (body.error !== undefined) throw new Error(body.error);
       if (body.result) return body.result;
-      progress(body.progress.scanned, body.progress.total);
+      progress(body);
     }
     if (done) throw new Error('The scan ended without an answer');
   }
@@ -304,20 +304,66 @@ function showProgress(scanned, total) {
   $('progress-text').textContent = scanned + ' of ' + plural(total, 'repository', 'repositories') + ' scanned';
 }
 
-/** Runs a scan with the Scan button disabled, \`Scanning…\`, until the latest scan is done. */
-async function busy(work) {
-  const current = {};
-  latest = current;
-  $('scan').disabled = true;
-  $('scan').textContent = 'Scanning…';
+/**
+ * The Scan button, or Stop while a scan runs: then not the form's submit button, so Enter in the
+ * field still scans the link entered, and only a click stops.
+ */
+function scanButton(stop) {
+  $('scan').type = stop ? 'button' : 'submit';
+  $('scan').textContent = stop ? 'Stop' : 'Scan';
+}
+
+/**
+ * Runs the latest scan, the button Stop until it ends; \`work(run)\` sets \`run.stopped\`, what Stop
+ * shows. \`replace\` (a link entered): the scan before it, if still running, is aborted, and shows
+ * nothing more; a repository opened leaves an earlier repository's scan to end, its answer kept.
+ */
+async function busy(work, replace) {
+  if (replace) running?.controller.abort();
+  const run = { controller: new AbortController(), stopped() {} };
+  running = run;
+  scanButton(true);
   try {
-    await work();
+    await work(run);
   } finally {
-    if (latest === current) {
-      $('scan').disabled = false;
-      $('scan').textContent = 'Scan';
+    if (running === run) {
+      running = undefined;
+      scanButton(false);
     }
   }
+}
+
+/** Stop: the scan's request aborted, what it has found so far shown, and the button Scan again. */
+function stop() {
+  const run = running;
+  if (!run) return;
+  running = undefined;
+  scanButton(false);
+  run.stopped();
+  run.controller.abort();
+}
+
+/** By skill count, the most first, then by name in any case; not scanned last: sortRepositories in src/core/organisation.ts. */
+function sortRepositories(repositories) {
+  const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const count = (entry) => entry.skillCount ?? -1;
+  return [...repositories].sort(
+    (a, b) => count(b) - count(a) || compare(a.name.toLowerCase(), b.name.toLowerCase()) || compare(a.name, b.name),
+  );
+}
+
+/**
+ * An organisation's scan stopped: the repositories done so far with their counts and warnings, the
+ * others not scanned, as the API's answer would have them.
+ */
+function partialOrganisation(listing, done) {
+  const repositories = sortRepositories(listing.repositories.map((entry) => done.get(entry.name)?.repository ?? entry));
+  return {
+    organisation: listing.organisation,
+    repositories,
+    skills: repositories.reduce((sum, entry) => sum + (entry.skillCount ?? 0), 0),
+    warnings: repositories.flatMap((entry) => done.get(entry.name)?.warnings ?? []),
+  };
 }
 
 /**
@@ -327,7 +373,7 @@ async function busy(work) {
 function scan(repo, skill, name, filter) {
   // This scan, to tell it from a later one of the same link.
   const current = {};
-  return busy(async () => {
+  return busy(async (run) => {
     $('error').textContent = '';
     scanned = repo;
     scanning = current;
@@ -339,17 +385,40 @@ function scan(repo, skill, name, filter) {
     $('tabs').hidden = true;
     $('loading').hidden = true;
     showProgress();
+    // An organisation's repositories once listed, and each one done: what Stop keeps.
+    let listing;
+    const done = new Map();
+    run.stopped = () => {
+      scanning = undefined;
+      result = undefined;
+      showProgress();
+      $('main').hidden = true;
+      if (!listing) {
+        $('organisation').hidden = true;
+        // Nothing shown: no warnings either, not even the scan's before.
+        showWarnings();
+        return setUrl(repo);
+      }
+      organisation = partialOrganisation(listing, done);
+      showOrganisation();
+      activate(undefined);
+    };
     try {
       // The whole repository: the filter narrows it here, as you type, without scanning again.
       // An organisation: the progress bar while its repositories are scanned.
-      const body = await requestWithProgress(repo, (done, total) => scanning === current && showProgress(done, total));
+      const body = await requestWithProgress(repo, run.controller.signal, (line) => {
+        if (scanning !== current) return;
+        if (line.repositories) listing = line;
+        if (line.repository) done.set(line.repository.name, line);
+        showProgress(line.progress.scanned, line.progress.total);
+      });
       if (scanning !== current) return;
       showProgress();
       if (body.organisation) {
         organisation = body;
         result = undefined;
         showOrganisation();
-        if (listed().some((entry) => entry.name === name)) return await openRepository(name, skill, filter);
+        if (listed().some((entry) => entry.name === name)) return await openRepository(name, skill, filter, run);
         return activate(undefined);
       }
       $('organisation').hidden = true;
@@ -360,7 +429,7 @@ function scan(repo, skill, name, filter) {
       showProgress();
       failed(error);
     }
-  });
+  }, true);
 }
 
 /** A failed scan: its message, nothing else; in a repository's tab, the organisation's tab stays. */
@@ -420,7 +489,7 @@ function showOrganisation() {
     const count = entry.skillCount === null ? 'not scanned' : plural(entry.skillCount, 'skill', 'skills');
     item.append(element('span', 'name', entry.name), element('span', 'count', count));
     // While another link is scanned, this organisation is no longer the one shown: nothing to open.
-    item.addEventListener('click', () => organisation === shown && busy(() => openRepository(entry.name)));
+    item.addEventListener('click', () => organisation === shown && busy((run) => openRepository(entry.name, undefined, '', run)));
     return item;
   }));
   rove($('repositories'));
@@ -430,9 +499,10 @@ function showOrganisation() {
 /**
  * One repository of the organisation, in the repository's tab, made active: its skills, as for a
  * repository link, at the commit counted. Opened before → as it was left, not scanned again; one
- * that failed is scanned again.
+ * that failed is scanned again. Stopped → its tab closed and the repository forgotten: the
+ * organisation's tab, no repository selected.
  */
-async function openRepository(name, skill, filter = '') {
+async function openRepository(name, skill, filter = '', run) {
   const known = opened.get(name);
   if (known && !known.error) {
     tab = known;
@@ -443,8 +513,15 @@ async function openRepository(name, skill, filter = '') {
   opened.set(name, state);
   tab = state;
   activate(state);
+  run.stopped = () => {
+    if (opened.get(name) === state) opened.delete(name);
+    if (tab !== state) return;
+    tab = undefined;
+    if (active === state) activate(undefined);
+    else showTabs();
+  };
   try {
-    state.result = await request(entry.commit ? entry.url + '/tree/' + entry.commit : entry.url);
+    state.result = await request(entry.commit ? entry.url + '/tree/' + entry.commit : entry.url, run.controller.signal);
   } catch (error) {
     state.error = error;
   }
@@ -578,6 +655,12 @@ $('filter').addEventListener('keydown', (event) => {
   if (event.key !== 'ArrowDown' || !$('skills').children.length) return;
   event.preventDefault();
   focusItem($('skills'));
+});
+
+$('scan').addEventListener('click', (event) => {
+  if (!running) return;
+  event.preventDefault();
+  stop();
 });
 
 $('form').addEventListener('submit', (event) => {

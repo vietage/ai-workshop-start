@@ -639,6 +639,29 @@ test('./skill-atlas scan <one repository | directory>: no cache, nothing read or
   }
 });
 
+test('a scan stopped halfway → the repositories done by then are kept; the next scan fetches only the rest', async (t) => {
+  const file = join(directory(t), 'cache.db');
+  const stop = new AbortController();
+  const first = counted();
+  await assert.rejects(
+    scanOrganisation(ORG, {
+      fetch: first.fetch,
+      token: 'test',
+      concurrency: 1,
+      signal: stop.signal,
+      cache: () => openCache(file),
+      // Stopped once 3 repositories are done, in the order listed: example-tools, Docs, alpha.
+      progress: (scanned) => scanned === 3 && stop.abort(),
+    }),
+  );
+  assert.deepEqual(first.trees(), ['SkillAtlas/Docs', 'SkillAtlas/alpha', 'SkillAtlas/example-tools']);
+  assert.deepEqual(Object.keys(entries(file)), ['SkillAtlas/Docs', 'SkillAtlas/alpha', 'SkillAtlas/example-tools']);
+  const next = counted();
+  const result = await scanner(file, next.fetch)(ORG);
+  assert.deepEqual(next.trees(), ['SkillAtlas/Beta', 'SkillAtlas/huge']);
+  assert.equal(result.skills, 6);
+});
+
 test('API: an organisation with a cold or a warm cache → the same JSON and stream; cache=0 scans everything again; one cache with the CLI', async (t) => {
   const file = join(directory(t), 'cache.db');
   const requests = counted();
@@ -659,7 +682,10 @@ test('API: an organisation with a cold or a warm cache → the same JSON and str
   const stream = await get('&stream=1');
   assert.deepEqual(stream.trees, []);
   const lines = stream.text.split('\n').filter(Boolean).map((line) => JSON.parse(line));
-  assert.deepEqual(lines, [...[0, 1, 2, 3, 4, 5, 6, 7].map((scanned) => ({ progress: { scanned, total: 7 } })), { result: JSON.parse(cold.text) }]);
+  assert.deepEqual(lines.map((line) => line.progress ?? line), [...[0, 1, 2, 3, 4, 5, 6, 7].map((scanned) => ({ scanned, total: 7 })), { result: JSON.parse(cold.text) }]);
+  // Each repository done, from the cache as when scanned: the same as in the result, whatever order they end in.
+  const byName = (entries: { name: string }[]) => [...entries].sort((a, b) => a.name.localeCompare(b.name));
+  assert.deepEqual(byName(lines.slice(1, -1).map((line) => line.repository)), byName(JSON.parse(cold.text).repositories));
   // cache=0, as --no-cache; anything else is not a bypass.
   assert.deepEqual(await get('&cache=0'), { ...cold, trees: KEPT });
   assert.deepEqual(await get('&cache=1'), { ...cold, trees: [] });
