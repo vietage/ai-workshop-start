@@ -62,6 +62,8 @@
   - A *limited height*: the list grows to at most 160px, and scrolls when it doesn't fit; the
     area never grows past its title and that list
 - A failed scan → its message, nothing else
+  - GitHub that does not answer → after the time limit (`spec/analysis.md`, *Details*), its
+    message, `Cannot reach GitHub: no answer in 30 s for <url>`; the button back to `Scan`
   - An answer that is not the API's JSON → `The server answered <status>`, not a parser's error
 - The page's URL keeps the link, the skill and the filter: `?repo=<link>&skill=<path>&filter=<words>`,
   the words joined by one space;

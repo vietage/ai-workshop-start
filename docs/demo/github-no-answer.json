@@ -1,0 +1,15 @@
+{
+  "serve": true,
+  "typingDelay": 60,
+  "steps": [
+    { "goto": "/", "pause": 800 },
+    { "caption": "GitHub stood in by a proxy that accepts every connection and never answers" },
+    { "type": "#repo", "text": "https://github.com/vietage/lang17", "pause": 300 },
+    { "click": "#scan", "pause": 1500 },
+    { "caption": "Scanning… until the time limit (5 s here, SKILL_ATLAS_GITHUB_TIMEOUT; 30 s by default)" },
+    { "waitFor": "#error:not(:empty)", "timeout": 20000 },
+    { "caption": "Then a clear message, nothing else, and the button back to Scan", "pause": 3500 },
+    { "caption": "The CLI: the same message, exit code 1, no hang" },
+    { "run": "./skill-atlas scan https://github.com/vietage/lang17", "pause": 3500 }
+  ]
+}

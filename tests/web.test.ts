@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { after, test } from 'node:test';
-import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, open, ORGANISATION_COMMIT, scanOrganisation } from './helpers.ts';
+import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, open, ORGANISATION_COMMIT, scanOrganisation, silentGitHub } from './helpers.ts';
 import { serve, type WebOptions } from '../src/web.ts';
 import { AtlasError } from '../src/core/errors.ts';
 
@@ -493,6 +493,48 @@ test('page: the URL keeps the link and the skill; reload shows the same', { time
     assert.equal(failed.shown('main'), false);
   } finally {
     failed.close();
+  }
+});
+
+test('serve: GitHub accepts the connection and never answers → the scan fails with a clear message, the page shows it', { timeout: 20_000 }, async () => {
+  const silent = await silentGitHub();
+  const child = spawn(process.execPath, [CLI, 'serve', '--port', '0'], { env: silent.env(1), stdio: ['ignore', 'pipe', 'inherit'] });
+  try {
+    const at = await new Promise<string>((resolve, reject) => {
+      child.stdout.setEncoding('utf8').on('data', (text: string) => {
+        const match = /localhost:(\d+)/.exec(text);
+        if (match) resolve(match[1]);
+      });
+      child.on('exit', (code) => reject(new Error(`exited with ${code}`)));
+    });
+    const link = 'https://github.com/vietage/lang17';
+    const message = 'Cannot reach GitHub: no answer in 1 s for https://api.github.com/repos/vietage/lang17';
+    const started = Date.now();
+    const response = await fetch(`http://127.0.0.1:${at}/api/scan?repo=${encodeURIComponent(link)}`);
+    assert.deepEqual({ status: response.status, body: await response.json() }, { status: 400, body: { error: message } });
+    assert.ok(Date.now() - started < 8_000, `${Date.now() - started} ms`);
+    // An organisation, streamed: the error before any line, as without stream=1.
+    const owner = await fetch(`http://127.0.0.1:${at}/api/scan?repo=github.com/vietage&stream=1`);
+    assert.deepEqual(
+      { status: owner.status, body: await owner.json() },
+      { status: 400, body: { error: 'Cannot reach GitHub: no answer in 1 s for https://api.github.com/users/vietage' } },
+    );
+    // The page: its message, nothing else, and the button back to Scan.
+    const view = await page('/', at);
+    try {
+      await view.enter(link);
+      assert.equal(view.$('error').textContent, message);
+      assert.equal(view.shown('main'), false);
+      assert.deepEqual(button(view), ['Scan', true]);
+      // The server still answers: another scan gives up the same way.
+      await view.enter(link);
+      assert.equal(view.$('error').textContent, message);
+    } finally {
+      view.close();
+    }
+  } finally {
+    child.kill();
+    silent.close();
   }
 });
 

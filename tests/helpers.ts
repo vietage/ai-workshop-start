@@ -1,4 +1,5 @@
 // Runs the commands the way the CLI does, with GitHub answering from EXAMPLE below.
+import { createServer, type Socket } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { run } from '../src/commands.ts';
 import { openGitHub, parseGitHubUrl } from '../src/core/github.ts';
@@ -120,4 +121,35 @@ export async function atlas(args: string[], { terminal = false, scan = scanOrgan
     progress: terminal ? { show: (line) => progress.push(line), hide: () => progress.push('hidden') } : undefined,
   });
   return { code, stdout: stdout.join('\n'), stderr: stderr.join('\n'), ...(terminal ? { progress } : {}) };
+}
+
+/**
+ * A GitHub that never answers: a proxy that accepts every connection and holds it, silent. The
+ * Node client reaches it with `silentGitHubEnv`, as through a real proxy.
+ */
+export async function silentGitHub() {
+  const held: Socket[] = [];
+  let connections = 0;
+  const server = createServer((socket) => {
+    connections++;
+    held.push(socket);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as { port: number };
+  return {
+    /** The environment of a `./skill-atlas` that goes through it, giving up after `seconds`. */
+    env: (seconds: number | string) => ({
+      ...process.env,
+      GITHUB_TOKEN: '',
+      NODE_USE_ENV_PROXY: '1',
+      HTTPS_PROXY: `http://127.0.0.1:${port}`,
+      NO_PROXY: 'localhost,127.0.0.1',
+      SKILL_ATLAS_GITHUB_TIMEOUT: String(seconds),
+    }),
+    connections: () => connections,
+    close: () => {
+      for (const socket of held) socket.destroy();
+      server.close();
+    },
+  };
 }
