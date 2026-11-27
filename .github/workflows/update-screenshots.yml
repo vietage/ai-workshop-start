@@ -1,0 +1,45 @@
+# New screenshot baselines for the QA scenarios (qa/screenshots), made where CI compares them: in the
+# official Playwright Docker image, on GitHub's Linux runners, never on a developer's machine.
+# Run it on a branch (Actions → Update screenshots → Run workflow, or
+# `gh workflow run update-screenshots.yml --ref <branch>`); it makes the baselines that changed or
+# are missing, checks that a second run matches them, and uploads them as the `screenshots`
+# artifact. A person looks at them and commits them (qa/README.md): nothing is pushed from here.
+name: Update screenshots
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Make the baselines
+        run: npm run e2e -- --update-snapshots
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The same run again, against the new baselines: a screenshot that is not stable fails here.
+      - name: Check them
+        run: npm run e2e
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: What changed
+        if: always()
+        run: git status --short qa/screenshots
+      - name: Upload the baselines
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots
+          path: qa/screenshots/
+      - name: Upload the QA run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-report
+          path: qa/results/
+          retention-days: 14
