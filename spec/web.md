@@ -6,6 +6,12 @@
 - Stops with Ctrl+C
 ## The page
 - A field for the **repository link**, and a *Scan* button
+- The *Scan* button: while a scan runs, *disabled*, `Scanning…`; once the **latest** scan ends,
+  `Scan`, enabled again: after a success, a failure, an organisation, a repository opened from an
+  organisation
+  - The latest: the last link entered, or the last repository of an organisation opened; an
+    earlier scan it replaced, ended or still running, does not change the button
+  - A repository of the organisation clicked while another link is scanned → nothing
 - The repository: `<owner>/<repo> · N skills`, its scanned commit
 - Its **skills**, sorted by name: name, the description's first sentence, path, `also in` for copies
 - A **filter** field above the skills: typing narrows them *as you type*, without scanning again,
