@@ -251,12 +251,14 @@ test('./skill-atlas serve stops with Ctrl+C', { timeout: 10_000 }, async () => {
 async function page(path: string, at = port) {
   const { JSDOM } = await import('jsdom');
   let scans = 0;
+  const requests: string[] = [];
   const dom = new JSDOM((await get('/')).text, {
     url: `http://localhost:${at}${path}`,
     runScripts: 'dangerously',
     beforeParse(window) {
       window.fetch = ((input: string, init?: RequestInit) => {
         scans++;
+        requests.push(String(input));
         return fetch(new URL(input, `http://127.0.0.1:${at}`), init);
       }) as typeof fetch;
       // As in a browser: jsdom has no TextDecoder of its own, and its AbortSignal is not the one
@@ -293,7 +295,7 @@ async function page(path: string, at = port) {
     return true;
   };
   const selected = () => items().find((item) => item.getAttribute('aria-selected') === 'true')?.dataset.path;
-  return { dom, $, settled, enter, items, text, search, filter, names, selected, shown, scans: () => scans, close: () => dom.window.close() };
+  return { dom, $, settled, enter, items, text, search, filter, names, selected, shown, scans: () => scans, requests, close: () => dom.window.close() };
 }
 
 test('page: a GitHub repository → <owner>/<repo> · N skills and its commit', { timeout: 5_000 }, async () => {
@@ -455,9 +457,10 @@ test('page: whatever is hidden is not shown, whatever its own style', { timeout:
   const view = await page('/');
   try {
     for (const element of view.dom.window.document.querySelectorAll('body *')) {
-      (element as HTMLElement).hidden = true;
+      // The attribute, as `hidden = true` sets it: the scenery's SVG elements have no such property.
+      element.setAttribute('hidden', '');
       assert.equal(view.dom.window.getComputedStyle(element).display, 'none', element.outerHTML.slice(0, 60));
-      (element as HTMLElement).hidden = false;
+      element.removeAttribute('hidden');
     }
   } finally {
     view.close();
@@ -930,16 +933,136 @@ test('page: an organisation\'s repositories in a column, one a line, the count n
   }
 });
 
-test('page: a gradient style: the header, the page, cards, the selected skill and its name', { timeout: 5_000 }, async () => {
+/** A colour of a computed style, `rgb(…)` or `rgba(…)`, as [r, g, b, alpha]. */
+function rgba(colour: string): [number, number, number, number] {
+  const parts = /^rgba?\(([^)]+)\)$/.exec(colour.trim())?.[1].split(',').map(Number);
+  assert.ok(parts && parts.length >= 3 && parts.every(Number.isFinite), `a colour: ${colour}`);
+  return [parts[0], parts[1], parts[2], parts[3] ?? 1];
+}
+/** The colours in a computed gradient or shadow, in order. */
+const colours = (value: string) => (value.match(/rgba?\([^)]+\)/g) ?? []).map(rgba);
+/** A colour over a ground, by its alpha: what is seen. */
+const over = (top: number[], ground: number[]) => [0, 1, 2].map((at) => top[at] * top[3] + ground[at] * (1 - top[3])).concat(1);
+/** The WCAG contrast ratio of two opaque colours. */
+function contrast(one: number[], other: number[]) {
+  const luminance = (colour: number[]) => {
+    const [r, g, b] = colour.slice(0, 3).map((value) => {
+      const channel = value / 255;
+      return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const [light, dark] = [luminance(one), luminance(other)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+}
+const WHITE = [255, 255, 255, 1];
+/** The page's style rules, and those of its `@media` rule for `query`. */
+function sheetRules(view: Awaited<ReturnType<typeof page>>, query?: string) {
+  const rules = [...view.dom.window.document.styleSheets[0].cssRules];
+  if (query === undefined) return rules.filter((rule) => 'selectorText' in rule) as CSSStyleRule[];
+  const media = rules.find((rule) => (rule as CSSMediaRule).media?.mediaText === query) as CSSMediaRule | undefined;
+  assert.ok(media, `a (${query}) rule`);
+  return [...media.cssRules] as CSSStyleRule[];
+}
+/** The ids of the cards: the scan form, the organisation, the errors and warnings, the skills, the SKILL.md. */
+const CARDS = ['scan-card', 'organisation', 'problems', 'list', 'skill'];
+
+test('page: a neon-sunset style: a sunset gradient, deep purple → hot pink → orange, fixed', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    const body = view.dom.window.getComputedStyle(view.dom.window.document.body);
+    assert.match(body.backgroundImage, /^linear-gradient\(180deg,/);
+    assert.equal(body.backgroundAttachment, 'fixed');
+    const stops = colours(body.backgroundImage);
+    assert.ok(stops.length >= 3, 'at least three colours');
+    const [r0, g0, b0] = stops[0];
+    // Deep purple at the top: dark, more blue than red, hardly any green.
+    assert.ok(r0 < 80 && g0 < 40 && b0 < 130 && b0 > r0 && r0 > g0, `deep purple first: ${stops[0]}`);
+    // Hot pink on the way down: red full, blue well over green.
+    assert.ok(stops.slice(1, -1).some(([r, g, b]) => r > 230 && g < 100 && b > 120), 'hot pink in the middle');
+    // Orange at the bottom: red full, green in between, little blue.
+    const [r1, g1, b1] = stops[stops.length - 1];
+    assert.ok(r1 > 230 && g1 > 120 && g1 < 210 && b1 < 110, `orange last: ${stops[stops.length - 1]}`);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a neon-sunset style: the scenery of a sun, the ocean and two palms, in CSS and inline SVG, decoration only', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    const document = view.dom.window.document;
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    const scenery = view.$('scenery');
+    // The sun: an inline SVG circle, filled with a gradient defined in the page itself.
+    const sun = scenery.querySelector('svg.sun circle')!;
+    assert.ok(sun, 'a sun');
+    const fill = /^url\(#([\w-]+)\)$/.exec(sun.getAttribute('fill')!)?.[1];
+    assert.equal(document.getElementById(fill!)?.localName, 'linearGradient');
+    // The ocean, with the horizon as its upper edge.
+    const ocean = scenery.querySelector('.ocean')!;
+    assert.match(style(ocean).backgroundImage, /linear-gradient\(/);
+    assert.match(style(ocean).borderTopWidth, /^[1-9]\d*px$/);
+    assert.equal(style(ocean).bottom, '0px');
+    // Two palms, silhouettes: one drawn, the other the same drawing, mirrored.
+    const palms = [...scenery.querySelectorAll('svg.palm')];
+    assert.equal(palms.length, 2);
+    for (const palm of palms) {
+      const shape = palm.querySelector('path') ?? document.querySelector(palm.querySelector('use')!.getAttribute('href')!);
+      assert.equal(shape?.localName, 'path');
+      assert.ok(shape!.getAttribute('d')!.length > 500, 'a drawing, not a placeholder');
+      const [r, g, b] = rgba(style(palm).fill);
+      assert.ok(r + g + b < 120, `a dark silhouette: ${style(palm).fill}`);
+    }
+    assert.notEqual(style(palms[0]).transform, style(palms[1]).transform);
+    // Decoration only: not for assistive technology, no focus, no clicks, behind everything, fixed.
+    assert.equal(scenery.getAttribute('aria-hidden'), 'true');
+    assert.equal(scenery.querySelector('a, button, input, select, textarea, [tabindex], [role]'), null);
+    assert.equal(scenery.textContent!.trim(), '');
+    assert.equal(style(scenery).pointerEvents, 'none');
+    assert.equal(style(scenery).position, 'fixed');
+    assert.ok(Number(style(scenery).zIndex) < 0, 'behind everything');
+    for (const node of document.querySelectorAll('body > :not(#scenery):not(script)')) {
+      assert.ok(!(Number(style(node).zIndex) < 0), node.id);
+    }
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a neon-sunset style: the main areas on cards: rounded, translucent glass, a neon border and shadow, brighter under the pointer', { timeout: 5_000 }, async () => {
   const view = await page('/');
   try {
     await view.enter(FIXTURE);
     const style = (node: Element) => view.dom.window.getComputedStyle(node);
-    const document = view.dom.window.document;
-    assert.match(style(document.querySelector('header')!).backgroundImage, /^linear-gradient\(/);
-    assert.match(style(document.body).backgroundImage, /^linear-gradient\(/);
-    // Rounded cards: jsdom gives `0px` for an element with no radius.
-    for (const id of ['organisation', 'problems', 'list', 'skill']) assert.match(style(view.$(id)).borderRadius, /^[1-9]\d*px$/, id);
+    // The scan form and its progress bar are in a card of their own.
+    assert.ok(view.$('scan-card').contains(view.$('form')));
+    assert.ok(view.$('scan-card').contains(view.$('progress')));
+    const hover = sheetRules(view).filter((rule) => rule.selectorText.includes(':hover'));
+    for (const id of CARDS) {
+      const card = style(view.$(id));
+      // Rounded: jsdom gives `0px` for an element with no radius.
+      assert.match(card.borderRadius, /^[1-9]\d*px$/, id);
+      // Translucent glass: a ground that lets the sunset through, blurred.
+      const alpha = rgba(card.backgroundColor)[3];
+      assert.ok(alpha > 0.5 && alpha < 1, `${id}: translucent, ${card.backgroundColor}`);
+      assert.match(card.backdropFilter, /\bblur\([1-9]\d*px\)/, id);
+      // A soft neon border and shadow: a border in pink or orange, a shadow that glows (no offset).
+      assert.match(card.borderTopWidth, /^[1-9]\d*px$/, id);
+      assert.equal(card.borderTopStyle, 'solid', id);
+      const [r, g, b, a] = rgba(card.borderTopColor);
+      assert.ok(r > 230 && b < 200 && g < 170 && a > 0 && a < 1, `${id}: a soft neon border, ${card.borderTopColor}`);
+      assert.match(card.boxShadow, /rgba\(255, 46, 151, [\d.]+\) 0px 0px [1-9]\d*px/, id);
+      // Under the pointer: another border colour and another shadow.
+      const lit = hover.filter((rule) => view.$(id).matches(rule.selectorText.replace(':hover', '')));
+      assert.ok(lit.some((rule) => rule.style.boxShadow && rule.style.boxShadow !== 'none'), `${id}: a shadow under the pointer`);
+      assert.ok(lit.some((rule) => rule.style.borderColor), `${id}: a border under the pointer`);
+    }
+    // What is not a card has none of it.
+    for (const node of [view.dom.window.document.querySelector('header')!, view.$('main'), view.$('form')]) {
+      assert.equal(style(node).borderRadius, '0px');
+      assert.equal(style(node).backgroundColor, 'rgba(0, 0, 0, 0)');
+    }
     const selected = view.items().find((item) => item.getAttribute('aria-selected') === 'true')!;
     const other = view.items().find((item) => item.getAttribute('aria-selected') === 'false')!;
     // The selected skill: a gradient tint and an accent bar; the others neither.
@@ -953,7 +1076,218 @@ test('page: a gradient style: the header, the page, cards, the selected skill an
   }
 });
 
-test('page: a gradient style: the selected repository tinted, with an accent bar; each count in a pill', { timeout: 5_000 }, async () => {
+test('page: a neon-sunset style: the title bold and italic, with a neon glow', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    const title = view.dom.window.document.querySelector('h1')!;
+    assert.equal(title.textContent, 'Skill Atlas');
+    const style = view.dom.window.getComputedStyle(title);
+    assert.ok(Number(style.fontWeight) >= 800, style.fontWeight);
+    assert.equal(style.fontStyle, 'italic');
+    assert.ok(parseFloat(style.fontSize) >= 30, style.fontSize);
+    assert.equal(style.textTransform, 'none');
+    // The glow: several shadows around the letters, without an offset, in neon pink.
+    const glow = style.textShadow.match(/rgba?\([^)]+\) 0px 0px [1-9]\d*px/g) ?? [];
+    assert.ok(glow.length >= 3, style.textShadow);
+    assert.ok(glow.some((shadow) => shadow.startsWith('rgb(255, 46, 151)')), style.textShadow);
+    // Light letters on the top of the sunset, the darkest of it.
+    const top = colours(view.dom.window.getComputedStyle(view.dom.window.document.body).backgroundImage)[0];
+    assert.ok(contrast(rgba(style.color), top) >= 4.5);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a neon-sunset style: the text at WCAG AA contrast on its card, whatever is behind the card', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    const AA = 4.5;
+    // The worst there can be behind a translucent card is white: brighter than the sun.
+    const card = over(rgba(style(view.$('list')).backgroundColor), WHITE);
+    for (const id of CARDS) assert.deepEqual(over(rgba(style(view.$(id)).backgroundColor), WHITE), card, id);
+    const check = (node: Element, ground: number[], what: string) => {
+      const ratio = contrast(rgba(style(node).color), ground);
+      assert.ok(ratio >= AA, `${what}: ${ratio.toFixed(2)}:1, ${style(node).color}`);
+    };
+    const selected = view.items().find((item) => item.getAttribute('aria-selected') === 'true')!;
+    const other = view.items().find((item) => item.getAttribute('aria-selected') === 'false')!;
+    assert.ok(selected.querySelector('.copies') && selected.querySelector('.description'));
+    for (const part of ['.name', '.description', '.path', '.copies']) {
+      check(other.querySelector(part) ?? other, card, `a skill's ${part}`);
+      // The selected one: on each colour of its tint, over the card.
+      for (const tint of colours(style(selected).backgroundImage)) check(selected.querySelector(part)!, over(tint, card), `the selected skill's ${part}`);
+    }
+    check(view.$('summary'), card, 'the header');
+    check(view.$('summary').querySelector('strong')!, card, 'the repository');
+    check(view.$('problems-title'), card, 'the warnings\' title');
+    check(view.$('warnings').children[0], card, 'a warning');
+    check(view.$('progress-text'), card, 'the progress');
+    check(view.$('skill').querySelector('a')!, card, 'the link');
+    // The skill's name is in a gradient: each of its colours.
+    for (const colour of colours(style(view.$('skill').querySelector('h2')!).backgroundImage)) {
+      assert.ok(contrast(colour, card) >= AA, `the skill's name: ${colour}`);
+    }
+    // The SKILL.md and the fields: on their own ground, over the card.
+    check(view.$('content'), over(rgba(style(view.$('content')).backgroundColor), card), 'the SKILL.md');
+    for (const id of ['repo', 'filter']) check(view.$(id), over(rgba(style(view.$(id)).backgroundColor), card), id);
+    const placeholder = sheetRules(view).find((rule) => rule.selectorText === 'input::placeholder')!;
+    assert.equal(placeholder.style.color, 'var(--muted)');
+    // The placeholders are in the muted colour, as the header is: that colour on the field's ground.
+    assert.equal(sheetRules(view).find((rule) => rule.selectorText === '#summary')!.style.color, 'var(--muted)');
+    check(view.$('summary'), over(rgba(style(view.$('repo')).backgroundColor), card), 'a placeholder');
+    // The button: dark text on each colour of its gradient (Stop's: in its own test).
+    const scan = view.$('scan') as HTMLButtonElement;
+    const stops = colours(style(scan).backgroundImage);
+    assert.ok(stops.length >= 2);
+    for (const stop of stops) check(scan, stop, 'Scan');
+    // A failed scan's message, and `Scanning <repo>…`: boxes of their own, not on a card.
+    await view.enter('/no/such/directory');
+    assert.notEqual(view.$('error').textContent, '');
+    check(view.$('error'), over(rgba(style(view.$('error')).backgroundColor), WHITE), 'the message');
+    check(view.$('loading'), over(rgba(style(view.$('loading')).backgroundColor), WHITE), 'Scanning <repo>…');
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a neon-sunset style: an organisation\'s text and its tabs at WCAG AA contrast', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    await openRepository(view, 'Beta');
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    const card = over(rgba(style(view.$('organisation')).backgroundColor), WHITE);
+    const check = (node: Element, ground: number[], what: string) => {
+      const ratio = contrast(rgba(style(node).color), ground);
+      assert.ok(ratio >= 4.5, `${what}: ${ratio.toFixed(2)}:1, ${style(node).color}`);
+    };
+    check(view.$('org-summary'), card, 'the header');
+    for (const item of view.$('repositories').children) {
+      const grounds = item.getAttribute('aria-selected') === 'true' ? colours(style(item).backgroundImage).map((tint) => over(tint, card)) : [card];
+      assert.ok(grounds.length);
+      for (const ground of grounds) {
+        check(item.querySelector('.name')!, ground, 'a repository');
+        check(item.querySelector('.count')!, over(rgba(style(item.querySelector('.count')!).backgroundColor), ground), 'its count');
+      }
+    }
+    for (const tab of tabsOf(view)) {
+      const ground = over(rgba(style(tab).backgroundColor), WHITE);
+      const grounds = tab.getAttribute('aria-selected') === 'true' ? colours(style(tab).backgroundImage).map((tint) => over(tint, ground)) : [ground];
+      assert.ok(grounds.length);
+      for (const each of grounds) {
+        check(tab, each, 'a tab');
+        if (tab.querySelector('.close')) check(tab.querySelector('.close')!, each, 'its ×');
+      }
+    }
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a neon-sunset style: Scan in neon, with a pink glow', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    const scan = view.$('scan') as HTMLButtonElement;
+    const style = () => view.dom.window.getComputedStyle(scan);
+    // Pink to orange, and a glow around it in neon pink.
+    const [from, to] = colours(style().backgroundImage);
+    assert.match(style().backgroundImage, /^linear-gradient\(/);
+    assert.ok(from[0] > 230 && from[1] < 120 && from[2] > 120, `pink: ${from}`);
+    assert.ok(to[0] > 230 && to[1] > 120 && to[2] < 110, `orange: ${to}`);
+    assert.match(style().boxShadow, /rgba\(255, 46, 151, [\d.]+\) 0px 0px [1-9]\d*px/);
+    assert.equal(style().cursor, 'pointer');
+    assert.equal(style().borderTopStyle, 'solid');
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a neon-sunset style: the fields and the progress bar in neon; a cyan outline on what has the focus', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter('github.com/skillatlas');
+    await openRepository(view, 'Beta');
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    const cyan = ([r, g, b]: number[]) => r < 120 && g > 200 && b > 200;
+    const root = view.dom.window.document.documentElement;
+    const resolved = (value: string) => value.replace(/var\((--[\w-]+)\)/g, (_, name) => style(root).getPropertyValue(name).trim());
+    assert.equal(resolved('var(--cyan)'), '#22e3e0');
+    /** The colour of a rule's outline, as `2px solid var(--cyan)`. */
+    const outlined = (rule: CSSStyleRule) => rgba(hex(/#[0-9a-f]{6}/.exec(resolved(rule.style.outline))?.[0] ?? ''));
+    // The fields: a cyan border on a dark, translucent ground.
+    for (const id of ['repo', 'filter']) {
+      const field = style(view.$(id));
+      assert.ok(cyan(rgba(field.borderTopColor)), `${id}: ${field.borderTopColor}`);
+      assert.match(field.borderRadius, /^[1-9]\d*px$/, id);
+      const [r, g, b, alpha] = rgba(field.backgroundColor);
+      assert.ok(r + g + b < 120 && alpha > 0, `${id}: ${field.backgroundColor}`);
+    }
+    // With the focus: a cyan outline and a glow. jsdom matches `:focus` on the focused element.
+    const repo = view.$('repo');
+    const before = style(repo).boxShadow;
+    repo.focus();
+    assert.match(style(repo).outline, /^\d+px solid/);
+    assert.ok(cyan(outlined(sheetRules(view).find((rule) => rule.selectorText === 'input:focus')!)));
+    assert.notEqual(style(repo).boxShadow, before);
+    assert.match(style(repo).boxShadow, /rgba\(34, 227, 224, [\d.]+\) 0px 0px [1-9]\d*px/);
+    repo.blur();
+    assert.equal(style(repo).boxShadow, before);
+    // The progress bar: rounded, a cyan border, its own look instead of the system's; cyan to pink.
+    const bar = style(view.$('progress-bar'));
+    assert.equal(bar.appearance, 'none');
+    assert.match(bar.borderRadius, /^[1-9]\d*px$/);
+    assert.ok(cyan(rgba(bar.borderTopColor)), bar.borderTopColor);
+    const value = sheetRules(view).filter((rule) => /^#progress-bar::-(webkit-progress-value|moz-progress-bar)$/.test(rule.selectorText));
+    assert.ok(value.length, 'the bar\'s value');
+    for (const rule of value) assert.match(rule.style.backgroundImage, /^linear-gradient\(90deg, (#22e3e0|rgb\(34, 227, 224\)), (#ff2e97|rgb\(255, 46, 151\))\)$/);
+    // From the keyboard: an outline in cyan on each control. jsdom matches no :focus-visible: the sheet.
+    const focus = sheetRules(view).filter((rule) => rule.selectorText.includes(':focus-visible') && /^\d+px solid/.test(rule.style.outline));
+    const controls = [view.$('scan'), view.$('warnings'), view.$('skill').querySelector('a')!, ...tabsOf(view), tabsOf(view)[1].querySelector('.close')!, view.items()[0], view.$('repositories').children[0]];
+    for (const control of controls) {
+      const rule = focus.find((each) => each.selectorText.split(',').some((selector) => control.matches(selector.replace(':focus-visible', ''))));
+      assert.ok(rule, `a :focus-visible outline: ${control.outerHTML.slice(0, 50)}`);
+      assert.ok(cyan(outlined(rule)), rule.style.outline);
+    }
+  } finally {
+    view.close();
+  }
+});
+/** `#rrggbb` as `rgb(r, g, b)`. */
+const hex = (colour: string) => /^#[0-9a-f]{6}$/.test(colour) ? `rgb(${[1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16)).join(', ')})` : colour;
+
+test('page: a neon-sunset style: the errors and warnings on their own card, in warm orange, their limited height kept; a failed scan\'s message in its box', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    assert.ok(view.shown('problems'));
+    assert.equal(view.$('warnings').children.length, 2);
+    assert.ok(view.$('problems').classList.contains('card'));
+    const orange = ([r, g, b]: number[]) => r > 230 && g > 120 && g < 220 && b < 170;
+    for (const node of [view.$('problems-title'), view.$('warnings'), view.$('warnings').children[0]]) assert.ok(orange(rgba(style(node).color)), style(node).color);
+    assert.ok(orange(rgba(style(view.$('problems')).borderTopColor)), style(view.$('problems')).borderTopColor);
+    // Its own area, of limited height, with a scrollbar: as before.
+    assertLimited(view);
+    assert.equal(view.$('warnings').tabIndex, 0);
+    // A failed scan: its message in a box of its own, pink on dark, with a border and a glow.
+    await view.enter('/no/such/directory');
+    const box = style(view.$('error'));
+    assert.match(box.borderRadius, /^[1-9]\d*px$/);
+    assert.match(box.borderTopWidth, /^[1-9]\d*px$/);
+    assert.notEqual(box.boxShadow, 'none');
+    const [r, g, b] = rgba(box.color);
+    assert.ok(r > 230 && g < 200 && b > g, box.color);
+    const ground = rgba(box.backgroundColor);
+    assert.ok(ground[0] + ground[1] + ground[2] < 150 && ground[3] > 0.5, box.backgroundColor);
+    assert.equal(box.overflowWrap, 'anywhere');
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a neon-sunset style: the selected repository tinted, with an accent bar; each count in a pill', { timeout: 5_000 }, async () => {
   const view = await page('/');
   try {
     await view.enter('github.com/skillatlas');
@@ -978,25 +1312,126 @@ test('page: a gradient style: the selected repository tinted, with an accent bar
   }
 });
 
-test('page: a gradient style, light and dark as the system\'s colours', { timeout: 5_000 }, async () => {
+test('page: a neon-sunset style: one look, on a dark base, whatever the system\'s colours', { timeout: 5_000 }, async () => {
   // jsdom evaluates no media queries, so this reads the page's style sheet itself.
   const view = await page('/');
   try {
-    const sheet = view.dom.window.document.styleSheets[0];
-    const rules = [...sheet.cssRules];
+    const rules = [...view.dom.window.document.styleSheets[0].cssRules];
     const root = rules.find((rule) => (rule as CSSStyleRule).selectorText === ':root') as CSSStyleRule;
-    assert.equal(root.style.getPropertyValue('color-scheme'), 'light dark');
-    const dark = rules.find((rule) => (rule as CSSMediaRule).media?.mediaText === '(prefers-color-scheme: dark)') as CSSMediaRule;
-    assert.ok(dark, 'a (prefers-color-scheme: dark) rule');
-    const darkRoot = [...dark.cssRules].find((rule) => (rule as CSSStyleRule).selectorText === ':root') as CSSStyleRule;
-    assert.ok(darkRoot, 'a :root rule for dark colours');
-    for (const name of ['--page', '--card', '--text', '--accent', '--selected']) {
-      const light = root.style.getPropertyValue(name);
-      const value = darkRoot.style.getPropertyValue(name);
-      assert.notEqual(value, '', name);
-      assert.notEqual(value, light, name);
+    assert.equal(root.style.getPropertyValue('color-scheme'), 'dark');
+    // No other colours for a light or a dark system.
+    for (const rule of rules) assert.doesNotMatch((rule as CSSMediaRule).media?.mediaText ?? '', /prefers-color-scheme/);
+    assert.equal(rules.filter((rule) => (rule as CSSStyleRule).selectorText === ':root').length, 1);
+    // A dark base: the cards and the page under the sunset; light text.
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    const dark = ([r, g, b]: number[]) => r + g + b < 120;
+    assert.ok(dark(rgba(style(view.$('list')).backgroundColor)), style(view.$('list')).backgroundColor);
+    assert.ok(dark(rgba(style(view.dom.window.document.body).backgroundColor)), style(view.dom.window.document.body).backgroundColor);
+    const [r, g, b] = rgba(style(view.dom.window.document.body).color);
+    assert.ok(r + g + b > 660, style(view.dom.window.document.body).color);
+    // The accents: neon pink, cyan, purple and warm orange.
+    const accent = (name: string) => rgba(hex(root.style.getPropertyValue(name).trim()));
+    const [pink, cyan, purple, orange] = ['--pink', '--cyan', '--purple', '--orange'].map(accent);
+    assert.ok(pink[0] > 230 && pink[1] < 100 && pink[2] > 120, `pink: ${pink}`);
+    assert.ok(cyan[0] < 100 && cyan[1] > 200 && cyan[2] > 200, `cyan: ${cyan}`);
+    assert.ok(purple[2] > 230 && purple[0] > 130 && purple[1] < purple[0], `purple: ${purple}`);
+    assert.ok(orange[0] > 230 && orange[1] > 120 && orange[1] < 200 && orange[2] < 110, `orange: ${orange}`);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a neon-sunset style: narrow screens → one column, Scan under the field; wider → the skills beside the SKILL.md', { timeout: 5_000 }, async () => {
+  // jsdom evaluates no media queries and has no layout: the rules, from the sheet.
+  const view = await page('/');
+  try {
+    await view.enter(FIXTURE);
+    const style = (node: Element) => view.dom.window.getComputedStyle(node);
+    // Wide: two columns, the skills first.
+    assert.equal(style(view.$('main')).display, 'grid');
+    assert.equal(style(view.$('main')).gridTemplateColumns.trim().split(/\s+(?![^(]*\))/).length, 2);
+    assert.deepEqual([...view.$('main').children].map((child) => child.id), ['list', 'skill']);
+    // The field and Scan on a line that wraps, so that neither is wider than the screen.
+    assert.equal(style(view.$('form')).display, 'flex');
+    assert.equal(style(view.$('form')).flexWrap, 'wrap');
+    assert.equal(style(view.$('repo')).minWidth, '0px');
+    const narrow = sheetRules(view, '(max-width: 720px)');
+    const rule = (node: Element, property: string) => narrow.find((each) => node.matches(each.selectorText) && each.style.getPropertyValue(property))?.style.getPropertyValue(property);
+    assert.equal(rule(view.$('main'), 'grid-template-columns'), '1fr');
+    // Scan takes a line of its own, under the field.
+    assert.match(rule(view.$('scan'), 'flex') ?? rule(view.$('scan'), 'flex-basis') ?? '', /100%$/);
+    // The long texts break instead of widening the page.
+    assert.equal(style(view.$('skill')).minWidth, '0px');
+    assert.equal(style(view.$('error')).overflowWrap, 'anywhere');
+  } finally {
+    view.close();
+  }
+});
+
+test('page: a neon-sunset style: animations and transitions only with prefers-reduced-motion: no-preference', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    const moves = (rule: CSSStyleRule) => ['animation', 'animation-name', 'transition', 'transition-property', 'transition-duration', 'scroll-behavior']
+      .some((property) => rule.style?.getPropertyValue(property));
+    const all = [...view.dom.window.document.styleSheets[0].cssRules];
+    // Nothing moves by default, nor in any other @media rule.
+    assert.deepEqual(sheetRules(view).filter(moves).map((rule) => rule.selectorText), []);
+    for (const media of all.filter((rule) => 'media' in rule) as CSSMediaRule[]) {
+      if (media.media.mediaText === '(prefers-reduced-motion: no-preference)') continue;
+      assert.deepEqual(([...media.cssRules] as CSSStyleRule[]).filter(moves).map((rule) => rule.selectorText), [], media.media.mediaText);
     }
-    assert.match(darkRoot.style.getPropertyValue('--page'), /^linear-gradient\(/);
+    // Those who have not asked for less: the glow of the title and of the sun, and soft transitions.
+    const motion = sheetRules(view, '(prefers-reduced-motion: no-preference)');
+    const keyframes = all.filter((rule) => 'name' in rule && 'cssRules' in rule).map((rule) => (rule as CSSKeyframesRule).name);
+    const animated = motion.filter((rule) => rule.style.getPropertyValue('animation'));
+    assert.ok(animated.some((rule) => view.dom.window.document.querySelector('h1')!.matches(rule.selectorText)), 'the title');
+    for (const rule of animated) assert.ok(keyframes.some((name) => rule.style.getPropertyValue('animation').split(' ').includes(name)), rule.selectorText);
+    assert.ok(motion.some((rule) => rule.style.getPropertyValue('transition') && view.$('list').matches(rule.selectorText)), 'the cards');
+    // The script moves nothing either.
+    const script = view.dom.window.document.querySelector('script')!.textContent!;
+    assert.doesNotMatch(script, /\banimate\(|requestAnimationFrame|setInterval|scrollIntoView|behavior:\s*'smooth'/);
+  } finally {
+    view.close();
+  }
+});
+
+test('page: no external resources: one document, system fonts, requests only to /api/scan', { timeout: 5_000 }, async () => {
+  const view = await page('/');
+  try {
+    const document = view.dom.window.document;
+    // Nothing that loads a file: no style sheet, image, font, frame, media, or script from elsewhere.
+    assert.equal(document.querySelector('link, img, picture, source, iframe, frame, embed, object, video, audio, image, feImage, base, meta[http-equiv], [src], [srcset], [background], [poster], [data]'), null);
+    assert.equal(document.querySelectorAll('style').length, 1);
+    assert.equal(document.querySelectorAll('script').length, 1);
+    const css = document.querySelector('style')!.textContent!;
+    assert.doesNotMatch(css, /@import|@font-face|@namespace|image-set\(|src\s*:/i);
+    // Every url() in the style and every reference in the drawings: to something in the page itself.
+    assert.deepEqual((css.match(/url\([^)]*\)/gi) ?? []), []);
+    const references = [...document.querySelectorAll('*')].flatMap((node) => [...node.attributes])
+      .filter((attribute) => /^(href|xlink:href|style)$/.test(attribute.name) || /url\(/.test(attribute.value));
+    assert.ok(references.length >= 3, 'the drawings refer to their gradient, mask and shape');
+    for (const { name, value } of references) assert.match(value, /^(#[\w-]+|url\(#[\w-]+\))$/, `${name}="${value}"`);
+    for (const { value } of references) assert.ok(document.getElementById(value.replace(/^url\(|\)$/g, '').slice(1)), value);
+    // No address of another site anywhere, but the example in the field's placeholder.
+    const html = (await get('/')).text;
+    const placeholder = view.$('repo').getAttribute('placeholder')!;
+    assert.match(placeholder, /^https:\/\/github\.com\/owner\/repo/);
+    assert.doesNotMatch(html.replace(placeholder, ''), /(https?:)?\/\/[\w-]+\.[a-z]/i);
+    // System fonts only: no font by name, so none to fetch or to take from anyone.
+    const generic = ['system-ui', 'sans-serif', 'ui-monospace', 'monospace', 'inherit'];
+    const families = sheetRules(view).map((rule) => rule.style.fontFamily).filter(Boolean).flatMap((value) => value.split(',').map((family) => family.trim()));
+    assert.ok(families.length);
+    for (const family of families) assert.ok(generic.includes(family), family);
+    // Original artwork: no name of a game or its maker in the page.
+    assert.doesNotMatch(html, /\bGTA\b|Grand Theft|Rockstar|Vice City/i);
+    // What the page asks the server for: the scan, nothing else.
+    await view.enter(FIXTURE);
+    await view.enter('github.com/skillatlas');
+    await openRepository(view, 'Beta');
+    assert.ok(view.requests.length >= 3);
+    for (const request of view.requests) assert.match(request, /^\/api\/scan\?/);
+    // And the server has nothing else to give: no file for a font, an image or a style sheet.
+    for (const path of ['/favicon.ico', '/style.css', '/fonts/neon.woff2', '/palm.svg']) assert.equal((await get(path)).status, 404, path);
   } finally {
     view.close();
   }
@@ -1484,7 +1919,7 @@ test('page: another link entered → the tabs closed; a repository link has no t
   }
 });
 
-test('page: a gradient style: the tabs on rounded cards, the active one tinted with an accent bar', { timeout: 5_000 }, async () => {
+test('page: a neon-sunset style: the tabs on rounded cards, the active one tinted with an accent bar', { timeout: 5_000 }, async () => {
   const view = await page('/');
   try {
     await view.enter('github.com/skillatlas');
@@ -1794,6 +2229,44 @@ const until = async (done: () => boolean) => {
     await new Promise((r) => setTimeout(r, 10));
   }
 };
+
+test('page: a neon-sunset style: Stop, while a scan runs, clearly not Scan: cyan on a dark ground, a cyan glow; Scan again after', { timeout: 5_000 }, async () => {
+  const held = await heldServer(0);
+  const view = await page('/', held.port);
+  const scan = view.$('scan') as HTMLButtonElement;
+  const style = () => view.dom.window.getComputedStyle(scan);
+  const cyan = ([r, g, b]: number[]) => r < 120 && g > 200 && b > 200;
+  try {
+    const looks = { image: style().backgroundImage, colour: style().color, border: style().borderTopColor, shadow: style().boxShadow };
+    (view.$('repo') as HTMLInputElement).value = FIXTURE;
+    view.$('form').dispatchEvent(new view.dom.window.Event('submit', { cancelable: true }));
+    await until(() => scan.textContent === 'Stop');
+    // No gradient, a dark ground, cyan text and border, a glow in cyan, not in pink.
+    assert.equal(style().backgroundImage, 'none');
+    const ground = rgba(style().backgroundColor);
+    assert.equal(ground[3], 1, style().backgroundColor);
+    assert.ok(Math.max(...ground.slice(0, 3)) < 60, style().backgroundColor);
+    assert.ok(cyan(rgba(style().color)), style().color);
+    assert.ok(cyan(rgba(style().borderTopColor)), style().borderTopColor);
+    assert.equal(style().borderTopStyle, 'solid');
+    assert.match(style().boxShadow, /rgba\(34, 227, 224, [\d.]+\) 0px 0px [1-9]\d*px/);
+    assert.doesNotMatch(style().boxShadow, /rgba?\(255, 46, 151/);
+    assert.equal(style().cursor, 'pointer');
+    assert.notDeepEqual({ image: style().backgroundImage, colour: style().color, border: style().borderTopColor, shadow: style().boxShadow }, looks);
+    // Its text at WCAG AA on its ground; brighter under the pointer, as Scan.
+    const ratio = contrast(rgba(style().color), ground);
+    assert.ok(ratio >= 4.5, `Stop: ${ratio.toFixed(2)}:1`);
+    const hover = sheetRules(view).filter((rule) => /:hover$/.test(rule.selectorText) && scan.matches(rule.selectorText.replace(':hover', '')));
+    assert.ok(hover.some((rule) => /rgb\(34, 227, 224\)|#22e3e0/.test(rule.style.boxShadow)), 'a cyan glow under the pointer');
+    // Stopped: Scan's look again.
+    scan.click();
+    assert.equal(scan.textContent, 'Scan');
+    assert.deepEqual({ image: style().backgroundImage, colour: style().color, border: style().borderTopColor, shadow: style().boxShadow }, looks);
+  } finally {
+    view.close();
+    held.close();
+  }
+});
 
 test('page: while an organisation scans, Stop → what has been found so far kept, the rest not scanned; Scan again', { timeout: 5_000 }, async () => {
   const held = await heldServer(3);

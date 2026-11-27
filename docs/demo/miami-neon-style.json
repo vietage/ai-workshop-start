@@ -1,0 +1,28 @@
+{
+  "serve": true,
+  "steps": [
+    { "goto": "/" },
+    { "caption": "A neon sunset over the ocean, palms, the title in neon", "pause": 3000 },
+    { "caption": "The scan form on a glass card; the field and Scan in neon" },
+    { "type": "#repo", "text": "./fixture", "pause": 600 },
+    { "click": "#scan" },
+    { "waitFor": "#skills li" },
+    { "caption": "The warnings, the skills and the SKILL.md: glass cards over the sunset", "pause": 3500 },
+    { "click": "#skills li:nth-child(3)" },
+    { "caption": "A skill selected: a neon tint and an accent bar", "pause": 2500 },
+    { "caption": "An organisation scanning: the button is Stop, cyan on dark, not Scan's pink" },
+    { "fill": "#repo" },
+    { "type": "#repo", "text": "github.com/Kotlin", "pause": 300 },
+    { "click": "#scan", "pause": 4000 },
+    { "waitFor": "#org-summary strong", "timeout": 300000 },
+    { "caption": "Its tab and its repositories on a card, each count in a pill", "pause": 3000 },
+    { "click": "#repositories li" },
+    { "waitFor": "#skills li", "timeout": 120000 },
+    { "caption": "A repository in its tab: the same cards", "pause": 3000 },
+    { "caption": "A failed scan: its message in its own box" },
+    { "fill": "#repo" },
+    { "type": "#repo", "text": "./no-such-directory", "pause": 300 },
+    { "click": "#scan" },
+    { "waitFor": "#error:not(:empty)", "pause": 3000 }
+  ]
+}

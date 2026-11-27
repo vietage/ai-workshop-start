@@ -101,12 +101,39 @@
     Reload restores the organisation's tab and, with `repository=`, the repository's tab with that
     repository, active, with its skill and filter; the other repositories opened are not kept
 ## Style
-A modern **gradient** style, light and dark as the system's colours:
-- The header on a violet-to-pink gradient; the page on a soft gradient
-- The organisation, the errors and warnings, the skills and the SKILL.md on rounded *cards*
-- A selected skill or repository: a gradient tint and an accent bar; the skill's name in the
+A **Miami neon-sunset** look: a sunset over the ocean, palms, glass cards. Only the look: nothing
+of *The page* above changes. *One* look, on a dark base, whatever the system's colours
+- **Background**: a sunset *gradient*, deep purple → hot pink → orange, fixed while the page
+  scrolls; on it the **scenery**: a *sun* on the horizon, the *ocean*, two *palm* silhouettes,
+  drawn in CSS and inline SVG
+  - Decoration only: hidden from assistive technology, nothing in it takes the focus or a click,
+    behind everything else
+- **Colours**: neon pink, cyan, purple and warm orange, as accents; the text at *WCAG AA* contrast
+  (4.5:1) on its card, whatever of the background is behind the card; a selected item's too
+- **Title**: bold, italic, with a neon glow
+- **Cards**: the scan form with its progress bar, the organisation, the errors and warnings, the
+  skills and the SKILL.md: rounded corners, translucent *glass* (what is behind, blurred), a soft
+  neon border and shadow; under the pointer, a brighter border and shadow
+- **Controls**, in the same neon:
+  - *Scan*: a pink-to-orange gradient, dark text, a pink glow; **Stop** (while a scan runs, *The
+    page*): clearly not *Scan*, no gradient, cyan text and border on a dark ground, a cyan glow
+  - The fields: a cyan border on a dark ground; with the focus, a cyan outline and glow
+  - The progress bar: rounded, cyan to pink
+  - The focus from the keyboard: a cyan outline, on the button, the fields, the tabs, the
+    warnings' list and the link, as on the lists' items
+- A selected skill or repository: a gradient tint and an accent bar; the skill's name in a
   gradient; a repository's count in a pill
 - The tabs on rounded cards; the active tab: a gradient tint and an accent bar
+- The **errors and warnings**: their own card, in warm orange; its limited height and its
+  scrollbar as in *The page*; a failed scan's message in its own box, pink on dark
+- **Narrow** screens, up to 720px wide: *one column*, the skills above the SKILL.md, *Scan* under
+  the field; wider: the skills beside the SKILL.md. Nothing wider than the screen
+- **Motion**: the glow's animations and the transitions only with
+  `prefers-reduced-motion: no-preference`; otherwise nothing moves
+- **Original artwork**, the style an inspiration only: no logo, font, character or image of a
+  game or anyone else
+- **No external resources**: no font, image, style sheet or script from elsewhere, system fonts
+  only; the page is one document, and asks the server only for `/api/scan`
 ## API
 `GET /api/scan?repo=<link>[&filter=<words>]` → JSON: `repository`, `skills` (each with its `link`
 and `content`, the SKILL.md text), `total` (the count before the filter), `warnings`

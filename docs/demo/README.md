@@ -23,6 +23,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [warnings-area.mp4](warnings-area.mp4) | [warnings-area.json](warnings-area.json) | a scan's warnings in their own area of limited height, with a scrollbar, [#36](https://github.com/vietage/ai-workshop-start/issues/36) |
 | [keyboard-lists.mp4](keyboard-lists.mp4) | [keyboard-lists.json](keyboard-lists.json) | the skills and an organisation's repositories from the keyboard, [#47](https://github.com/vietage/ai-workshop-start/issues/47) |
 | [stop-scan.mp4](stop-scan.mp4) | [stop-scan.json](stop-scan.json) | Stop a running scan, keeping what has been found so far, [#38](https://github.com/vietage/ai-workshop-start/issues/38) |
+| [miami-neon-style.mp4](miami-neon-style.mp4) | [miami-neon-style.json](miami-neon-style.json) | the Miami neon-sunset look: the sunset, the palms, glass cards, neon controls, [#59](https://github.com/vietage/ai-workshop-start/issues/59) |
 
 ## word-filter
 
@@ -180,3 +181,16 @@ of its own, removed first (`SKILL_ATLAS_CACHE=/tmp/stop-demo/cache.db`):
 | Stop, at 57 of 107 | `Kotlin · 107 repositories · 3 skills`, the rest `not scanned`, no bar, **Scan** | what has been found so far is kept |
 | a repository not scanned, selected | its skills, scanned now | a not scanned repository can still be opened |
 | Scan again | every repository with its count, 20 skills | scan again afterwards works; the cache keeps the stopped scan's |
+
+## miami-neon-style
+
+The web view on `./fixture`, then `github.com/Kotlin`, then a directory that does not exist:
+
+| Step | Shows |
+| --- | --- |
+| The empty page | the sunset gradient, the sun on the horizon, the ocean, two palms, the title in neon |
+| `./fixture` scanned | the scan form, the warnings, the skills and the SKILL.md on glass cards |
+| A skill selected | its neon tint and accent bar |
+| `github.com/Kotlin` scanning | the button is **Stop**: cyan on a dark ground, a cyan glow, not *Scan*'s pink |
+| A repository opened | the tabs, and the same cards in the repository's tab |
+| `./no-such-directory` | the failed scan's message in its own box |
