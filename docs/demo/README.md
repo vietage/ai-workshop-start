@@ -16,6 +16,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [organisation-cache.mp4](organisation-cache.mp4) | [organisation-cache.json](organisation-cache.json) | the cache of an organisation's scan, [#22](https://github.com/vietage/ai-workshop-start/issues/22) |
 | [nicer-skill-list.mp4](nicer-skill-list.mp4) | [nicer-skill-list.json](nicer-skill-list.json) | the gradient style, an organisation's repositories in a column, [#30](https://github.com/vietage/ai-workshop-start/issues/30) |
 | [repository-tabs.mp4](repository-tabs.mp4) | [repository-tabs.json](repository-tabs.json) | an organisation's repository in a tab of its own, in the page, [#37](https://github.com/vietage/ai-workshop-start/issues/37) |
+| [scan-button.mp4](scan-button.mp4) | [scan-button.json](scan-button.json) | the Scan button back to `Scan` once the latest scan ends, [#34](https://github.com/vietage/ai-workshop-start/issues/34) |
 
 ## word-filter
 
@@ -100,3 +101,18 @@ The web view on the `Kotlin` organisation, on its default branches:
 | `kotlinx-rpc` again | `test`, 10 of 17, the same skill, not scanned again | as it was left |
 | reload | the `kotlinx-rpc` tab, active, its filter and skill | the URL restores the active tab |
 | `×` | only the `Kotlin` tab, its repositories | closing the repository's tab |
+
+## scan-button
+
+The web view on the `Kotlin` organisation, on its default branches, then a directory that does
+not exist:
+
+| Step | Shows | Why |
+| --- | --- | --- |
+| `github.com/Kotlin`, Scan | `Scanning…`, disabled; `Scan` once the repositories are shown | the button while a scan runs, and after |
+| `kotlinx-rpc` selected | `Scanning…`, then `Scan` with its skills | a repository opened from an organisation |
+| `dataframe`, then `multik` at once | `Scan` once `multik` is shown | the button follows the latest scan only |
+| `/no/such/directory`, Scan | its message, `Scan`, enabled | after a failure too |
+
+A scan that never ends (the case of [#34](https://github.com/vietage/ai-workshop-start/issues/34))
+cannot be recorded against GitHub; `tests/web.test.ts` stalls one in a stand-in server.

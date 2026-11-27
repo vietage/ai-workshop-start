@@ -139,8 +139,9 @@ let tab;
 let active;
 // The latest scan of a link entered: only its progress is shown.
 let scanning;
-// Scans under way: the Scan button waits for all of them.
-let pending = 0;
+// The latest scan started, a link entered or a repository opened: the Scan button waits for it
+// only, not for an earlier one it replaced, which may never finish.
+let latest;
 const plural = (count, one, many) => count + ' ' + (count === 1 ? one : many);
 
 // The same rule as filterSkills in src/core/model.ts: the name or the description contains every
@@ -203,15 +204,16 @@ function showProgress(scanned, total) {
   $('progress-text').textContent = scanned + ' of ' + plural(total, 'repository', 'repositories') + ' scanned';
 }
 
-/** Runs a scan with the Scan button disabled until every scan under way is done. */
+/** Runs a scan with the Scan button disabled, \`Scanning…\`, until the latest scan is done. */
 async function busy(work) {
-  pending++;
+  const current = {};
+  latest = current;
   $('scan').disabled = true;
   $('scan').textContent = 'Scanning…';
   try {
     await work();
   } finally {
-    if (--pending === 0) {
+    if (latest === current) {
       $('scan').disabled = false;
       $('scan').textContent = 'Scan';
     }
@@ -272,7 +274,8 @@ function failed(error) {
 
 /** The organisation: its repositories, each with its skill count, and its warnings. */
 function showOrganisation() {
-  const { organisation: owner, repositories, skills, warnings } = organisation;
+  const shown = organisation;
+  const { organisation: owner, repositories, skills, warnings } = shown;
   $('organisation').hidden = false;
   $('org-summary').replaceChildren(
     element('strong', '', owner.name),
@@ -285,7 +288,8 @@ function showOrganisation() {
     item.dataset.name = entry.name;
     const count = entry.skillCount === null ? 'not scanned' : plural(entry.skillCount, 'skill', 'skills');
     item.append(element('span', 'name', entry.name), element('span', 'count', count));
-    item.addEventListener('click', () => busy(() => openRepository(entry.name)));
+    // While another link is scanned, this organisation is no longer the one shown: nothing to open.
+    item.addEventListener('click', () => organisation === shown && busy(() => openRepository(entry.name)));
     return item;
   }));
   $('org-warnings').replaceChildren(...warnings.map((warning) => element('li', '', warning)));
