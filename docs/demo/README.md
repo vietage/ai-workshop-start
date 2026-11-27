@@ -16,6 +16,7 @@ node .agents/skills/record-demo/record.mjs docs/demo/<slug>.json docs/demo/<slug
 | [organisation-cache.mp4](organisation-cache.mp4) | [organisation-cache.json](organisation-cache.json) | the cache of an organisation's scan, [#22](https://github.com/vietage/ai-workshop-start/issues/22) |
 | [nicer-skill-list.mp4](nicer-skill-list.mp4) | [nicer-skill-list.json](nicer-skill-list.json) | the gradient style, an organisation's repositories in a column, [#30](https://github.com/vietage/ai-workshop-start/issues/30) |
 | [scan-button.mp4](scan-button.mp4) | [scan-button.json](scan-button.json) | the Scan button back to `Scan` once the latest scan ends, [#34](https://github.com/vietage/ai-workshop-start/issues/34) |
+| [github-no-answer.mp4](github-no-answer.mp4) | [github-no-answer.json](github-no-answer.json) | a GitHub that never answers: the scan gives up with a clear message, in the web view and the CLI, [#44](https://github.com/vietage/ai-workshop-start/issues/44) |
 
 ## word-filter
 
@@ -100,3 +101,13 @@ not exist:
 
 A scan that never ends (the case of [#34](https://github.com/vietage/ai-workshop-start/issues/34))
 cannot be recorded against GitHub; `tests/web.test.ts` stalls one in a stand-in server.
+
+## github-no-answer
+
+Recorded through a stand-in for GitHub that accepts every connection and never answers (the
+issue's `silent-proxy.py`, on port 4199), with a 5 s limit:
+
+```bash
+NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://127.0.0.1:4199 NO_PROXY=localhost,127.0.0.1 SKILL_ATLAS_GITHUB_TIMEOUT=5 \
+  node .agents/skills/record-demo/record.mjs docs/demo/github-no-answer.json docs/demo/github-no-answer.mp4
+```

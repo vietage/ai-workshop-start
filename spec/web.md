@@ -33,6 +33,8 @@
   - It fails → its message; the organisation stays
   - Unknown organisation → its message, nothing else
 - Warnings, under the skills; a failed scan → its message, nothing else
+  - GitHub that does not answer → after the time limit (`spec/analysis.md`, *Details*), its
+    message, `Cannot reach GitHub: no answer in 30 s for <url>`; the button back to `Scan`
 - The page's URL keeps the link, the skill and the filter: `?repo=<link>&skill=<path>&filter=<words>`,
   the words joined by one space;
   reload shows the same, a failed scan's message too
