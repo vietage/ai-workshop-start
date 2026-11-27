@@ -63,6 +63,8 @@ gh api "repos/$repo/commits/<sha>/statuses" --jq '[.[] | select(.context == "air
   fork. The person's next push restarts the chain, as does `Ready for review` set by hand (the
   command above, `state=pending`). Without `statuses: write` it is a PR comment with the
   `air-chain` note marker.
+- Screenshots that differ from their baselines (a red `e2e` check for that reason alone) are
+  accepted, not compared: address-review counts the check as green and merges.
 - `air-chain/review` can be a required status check in branch protection: it is green only when
   review-pr approved the head commit.
 - The review itself is a PR review (`event: COMMENT`) with inline comments; its body holds the

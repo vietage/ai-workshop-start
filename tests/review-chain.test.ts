@@ -275,3 +275,12 @@ test('the hand-over: no skill ends by asking a person to set a status; the push 
     assert.doesNotMatch(skill(name), /poll for|No verdict after|in the same run, by one/i, name);
   }
 });
+
+test('changed screenshots: address-review accepts them and merges, without comparing them', () => {
+  const address = skill('address-review');
+  assert.ok(address.includes('### Changed screenshots'));
+  assert.ok(address.includes("Don't compare screenshots."));
+  assert.match(address, /count the check as green, merge on\s+`approve`/);
+  // Only the screenshots: a scenario that fails anywhere else still blocks the merge.
+  assert.ok(address.includes('A scenario that fails at any other step is still a red check.'));
+});
