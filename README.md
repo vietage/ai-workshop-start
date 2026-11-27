@@ -21,8 +21,10 @@ In a terminal, the names are bold and the links dim; piped, or with `NO_COLOR` s
 plain text, the same words.
 
 An organisation, or a user: `./skill-atlas scan github.com/JetBrains` lists its repositories, each
-with its skill count, the most first; archived repositories and forks are skipped. While it scans, a
-progress bar shows how many repositories are done, in the terminal and in the web view.
+with its skill count, the most first; archived repositories and forks are skipped. Repositories with
+no skills are left out of the list, but counted in its header; the ones that could not be scanned
+stay. While it scans, a progress bar shows how many repositories are done, in the terminal and in
+the web view.
 
 An organisation's scan remembers each repository's skill count, warnings and commit in a local SQLite
 cache, `~/.cache/skill-atlas/cache.db` (or in `XDG_CACHE_HOME`; `SKILL_ATLAS_CACHE=<file>` for another
@@ -33,12 +35,14 @@ the cache, and a missing or broken one never fails a scan. One repository's scan
 
 Or in a browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
 for the repository or organisation link (an organisation's repositories in a column, each with its
-skill count), its skills (with a field to filter them) and each one's SKILL.md, in a gradient style,
+skill count; a repository selected opens its skills in a tab of its own in the page, next to the
+organisation's tab), its skills (with a field to filter them) and each one's SKILL.md, in a gradient style,
 light or dark as the system's colours (`--port <port>` for another port). While a scan runs, the
 *Scan* button is **Stop**: it stops the scan, on the server too, and keeps what has been found so far,
 an organisation's repositories already scanned with their counts, the rest `not scanned`.
 
-Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests. `npm run qa` tests the
+Set `GITHUB_TOKEN` for a higher GitHub rate limit. A GitHub request that gets no answer gives up after 30 s with
+`Cannot reach GitHub: no answer in 30 s for <url>` (`SKILL_ATLAS_GITHUB_TIMEOUT=<seconds>` for another limit, `Infinity` for none). `npm test` runs the tests. `npm run qa` tests the
 web view in a browser, scenario by scenario, and records each one; `npm run qa:issues` files an issue
 for each failure ([qa/](qa/README.md), the [manual-qa skill](.agents/skills/manual-qa/SKILL.md)).
 `npm run e2e` runs the same scenarios in the Playwright Docker image, as CI does on every push and
@@ -57,6 +61,9 @@ pull request, and compares the screenshots of their key moments with the Linux b
 - [red-agent](.agents/skills/red-agent/SKILL.md): an agent tries to break the web view beyond the QA
   scenarios and files an issue per bug, with the steps, what the spec expects and a video, labelled
   `Delegated to AI` so that issue-to-pr fixes it ([spec/red-agent.md](spec/red-agent.md)).
+- [status-update](.agents/skills/status-update/SKILL.md): the pull requests merged and the issues
+  resolved since a date, posted to your private Slack channel (`SLACK_STATUS_CHANNEL`), never the
+  shared `#my-ai-workshop` ([spec/status-update.md](spec/status-update.md)).
 - [memory/](memory/README.md): notes agents leave for the next task, what a task learned; written
   at the end of a task by the [update-memory](.agents/skills/update-memory/SKILL.md) skill, and
   never reviewed.

@@ -43,6 +43,12 @@ Skill: id = `repo:path`, name, description, commit, copies
 - An answer GitHub cut off, or one that is not JSON (a proxy's error page) → a clear message,
   exit code 1
 - An empty repository, without a commit → a clear message, exit code 1
+- A request GitHub *does not answer* (the connection accepted, then nothing; an answer that stops
+  halfway; a stalled network) → given up after **30 s**, the answer and its body together:
+  `Cannot reach GitHub: no answer in 30 s for <url>`, exit code 1; never a hang
+  - `SKILL_ATLAS_GITHUB_TIMEOUT=<seconds>`: another limit; `Infinity`, or more than about
+    24.8 days (2 147 483 647 ms, the longest timer): *no limit*; not a number above 0: 30 s
+  - The CLI exits once its output is written, even when a connection given up on stays open
 ## Organisation
 `github.com/<org>`: every repository of an organisation, or of a user, each with its **skill count**
 - **Output**: the organisation, its **repositories** (each with its name, commit, skill count),
@@ -58,6 +64,8 @@ Skill: id = `repo:path`, name, description, commit, copies
   not JSON, an unexpected one) → a *warning*, `<repo>: not scanned: <message>`; the scan goes on;
   it is listed **last**, with *no count* and no commit
 - An empty repository → *0 skills*, no warning
+- The output keeps *every* repository, those with 0 skills too; the CLI and the web page leave
+  them out of the list (`spec/cli.md`, `spec/web.md`)
 - **Progress**: `scanned` of `total` repositories, the archived ones and forks not counted; *0 of N*
   once listed, then one more as each repository is done, whatever its outcome, the failed ones too;
   nothing before the list (an unknown organisation)
@@ -65,6 +73,7 @@ Skill: id = `repo:path`, name, description, commit, copies
     just done, as in the output, and its warnings
 - **Stopped** (the web view's Stop): no repository started after it, the requests under way
   aborted, no output; the repositories done by then are kept in the *cache*, one cut short is not
+  - Until it is stopped, each request still gives up after the time limit (*Details*)
 - *8 repositories* at a time; no time budget: JetBrains, 549 repositories, in about a minute with
   `GITHUB_TOKEN`; less with a warm *cache*
 - No filter: it is for one repository

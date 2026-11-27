@@ -64,8 +64,14 @@ function repositoryJson({ name, url, commit, skillCount }: OrganisationRepositor
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
+/**
+ * The longest request read, its URL and headers together: Node's default, 16 KB, refuses a long
+ * link before the handler runs; this is more than a browser sends (Chrome: a 2 MB URL).
+ */
+export const MAX_REQUEST = 4 * 1024 * 1024;
+
 export function createWebServer(options: WebOptions): Server {
-  return createServer(async (request, response) => {
+  const server = createServer({ maxHeaderSize: MAX_REQUEST }, async (request, response) => {
     const send = (status: number, type: string, body: string) => {
       response.writeHead(status, { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-store' });
       response.end(body);
@@ -127,6 +133,18 @@ export function createWebServer(options: WebOptions): Server {
       json(error instanceof AtlasError ? 400 : 500, { error: message });
     }
   });
+  // A request Node cannot read (longer than MAX_REQUEST, malformed): 400 and a message as JSON,
+  // not Node's empty 400 or 431.
+  server.on('clientError', (error: NodeJS.ErrnoException, socket) => {
+    if (error.code === 'ECONNRESET' || !socket.writable) return socket.destroy();
+    const message = error.code === 'HPE_HEADER_OVERFLOW' ? `The request is too long: at most ${MAX_REQUEST / 1024 / 1024} MB` : 'Not a valid request';
+    const body = JSON.stringify({ error: message });
+    socket.end(
+      'HTTP/1.1 400 Bad Request\r\ncontent-type: application/json; charset=utf-8\r\ncache-control: no-store\r\n' +
+        `content-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`,
+    );
+  });
+  return server;
 }
 
 /** Listens on localhost; resolves with the page's address. */

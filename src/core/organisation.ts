@@ -82,9 +82,9 @@ export type OrganisationOptions = GitHubOptions & {
 export async function scanOrganisation(input: string, options: OrganisationOptions): Promise<OrganisationResult> {
   const { signal } = options;
   signal?.throwIfAborted();
-  // Every request of the scan stops with it.
+  // Every request of the scan stops with it, and still gives up on its own timeout.
   const { fetch } = options;
-  if (signal) options = { ...options, fetch: (url, init) => fetch(url, { ...init, signal }) };
+  if (signal) options = { ...options, fetch: (url, init) => fetch(url, { ...init, signal: withStop(init?.signal, signal) }) };
   const owner = await listRepositories(input, options);
   signal?.throwIfAborted();
   const total = owner.repositories.length;
@@ -155,6 +155,11 @@ async function scanListed(listed: ListedRepository, options: OrganisationOptions
   }
 }
 
+/** A request's own signal (its timeout) and the scan's stop: either one aborts it. */
+export function withStop(own: AbortSignal | undefined, stop: AbortSignal | undefined): AbortSignal | undefined {
+  return own && stop ? AbortSignal.any([own, stop]) : (own ?? stop);
+}
+
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -166,6 +171,14 @@ export function sortRepositories(repositories: OrganisationRepository[]): Organi
   return [...repositories].sort(
     (a, b) => count(b) - count(a) || compare(a.name.toLowerCase(), b.name.toLowerCase()) || compare(a.name, b.name),
   );
+}
+
+/**
+ * The repositories an organisation's list shows: every one but those scanned with no skills; the
+ * ones that failed (`not scanned`) stay. The page applies the same rule (src/web-page.ts).
+ */
+export function listedRepositories(repositories: OrganisationRepository[]): OrganisationRepository[] {
+  return repositories.filter((repository) => repository.skillCount !== 0);
 }
 
 /**

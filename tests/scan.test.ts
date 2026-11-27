@@ -1,21 +1,21 @@
 // The decisions in spec/analysis.md and spec/cli.md, checked on what the real command prints for
 // ./fixture, for temporary directories, and for GitHub repositories answered from recordings.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { progressBar, run } from '../src/commands.ts';
-import { openGitHub, parseGitHubOwner, parseGitHubUrl } from '../src/core/github.ts';
+import { GITHUB_TIMEOUT, TIMER_LIMIT, openGitHub, parseGitHubOwner, parseGitHubUrl, type Fetch } from '../src/core/github.ts';
 import { AtlasError } from '../src/core/errors.ts';
 import { scanOrganisation } from '../src/core/organisation.ts';
 import { parseSkill } from '../src/core/parse.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { scan } from '../src/core/scan.ts';
 import { openDirectory } from '../src/local.ts';
-import { atlas, CLI, TERMINAL, EXAMPLE_COMMIT, FIXTURE, github, ORGANISATION_COMMIT, scanOrganisation as scanRecorded } from './helpers.ts';
+import { atlas, CLI, TERMINAL, EXAMPLE_COMMIT, FIXTURE, github, ORGANISATION_COMMIT, scanOrganisation as scanRecorded, silentGitHub } from './helpers.ts';
 
 const fixture = await atlas(['scan', FIXTURE]);
 const example = await atlas(['scan', 'github.com/JetBrains/example']);
@@ -367,6 +367,118 @@ test('rate limit → a message that asks for GITHUB_TOKEN', async () => {
   });
 });
 
+/** A fetch that answers as `github`, but never for the URLs that `silent` matches: no answer, no error, the signal ignored. */
+const unanswered = (silent: (url: string) => boolean, how: 'no answer' | 'no body' = 'no answer'): Fetch => async (url, init) => {
+  if (!silent(url)) return github(url, init);
+  if (how === 'no answer') return new Promise<Response>(() => {});
+  // The status and the headers, then the body stops: never closed.
+  return new Response(new ReadableStream({ start: (controller) => controller.enqueue(new TextEncoder().encode('{"sha":')) }), { status: 200 });
+};
+
+test('GitHub does not answer → given up after 30 s by default, a clear message', async () => {
+  assert.equal(GITHUB_TIMEOUT, 30_000);
+  const repository = 'https://api.github.com/repos/JetBrains/example';
+  const started = Date.now();
+  await assert.rejects(openGitHub('github.com/JetBrains/example', { fetch: unanswered((url) => url === repository), timeout: 200 }), {
+    message: `Cannot reach GitHub: no answer in 0.2 s for ${repository}`,
+  });
+  assert.ok(Date.now() - started < 2_000);
+  // An answer whose body stops halfway: the same limit, the answer and its body together.
+  const commit = `${repository}/commits/main`;
+  await assert.rejects(openGitHub('github.com/JetBrains/example', { fetch: unanswered((url) => url === commit, 'no body'), timeout: 200 }), {
+    message: `Cannot reach GitHub: no answer in 0.2 s for ${commit}`,
+  });
+  // A SKILL.md that never comes.
+  const file = `https://raw.githubusercontent.com/JetBrains/example/${EXAMPLE_COMMIT}/.claude/skills/commits/SKILL.md`;
+  const source = await openGitHub('github.com/JetBrains/example', { fetch: unanswered((url) => url === file), token: 'test', timeout: 200 });
+  await assert.rejects(scan(source), { message: `Cannot reach GitHub: no answer in 0.2 s for ${file}` });
+  // An answer in time is not given up on.
+  const slow: Fetch = async (url, init) => (await new Promise((resolve) => setTimeout(resolve, 50)), github(url, init));
+  const scanned = await scan(await openGitHub('github.com/JetBrains/example', { fetch: slow, token: 'test', timeout: 1_000 }));
+  assert.equal(scanned.skills.length, 1);
+});
+
+test('a limit too long for a timer, or Infinity → no limit: an answer that comes is used, no 1 ms limit', async () => {
+  assert.equal(TIMER_LIMIT, 2 ** 31 - 1);
+  const warnings: Error[] = [];
+  const warn = (warning: Error) => warnings.push(warning);
+  process.on('warning', warn);
+  try {
+    const slow: Fetch = async (url, init) => (await new Promise((resolve) => setTimeout(resolve, 20)), github(url, init));
+    for (const timeout of [Infinity, TIMER_LIMIT + 1, 3_000_000_000, TIMER_LIMIT]) {
+      const scanned = await scan(await openGitHub('github.com/JetBrains/example', { fetch: slow, token: 'test', timeout }));
+      assert.equal(scanned.skills.length, 1, String(timeout));
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    process.off('warning', warn);
+  }
+  assert.deepEqual(warnings.filter((warning) => warning.name === 'TimeoutOverflowWarning'), []);
+});
+
+test('organisation: a repository GitHub does not answer for → not scanned, a warning; the others are listed', async () => {
+  const result = await scanOrganisation('github.com/skillatlas', {
+    fetch: unanswered((url) => url.includes('/SkillAtlas/alpha/')),
+    token: 'test',
+    timeout: 200,
+  });
+  // Listed last, with the other one that failed, without a count.
+  assert.deepEqual(result.repositories.slice(-2), [
+    { name: 'alpha', url: 'https://github.com/SkillAtlas/alpha' },
+    { name: 'broken', url: 'https://github.com/SkillAtlas/broken' },
+  ]);
+  assert.ok(
+    result.warnings.includes('alpha: not scanned: Cannot reach GitHub: no answer in 0.2 s for https://api.github.com/repos/SkillAtlas/alpha/commits/main'),
+    result.warnings.join('\n'),
+  );
+  assert.equal(result.repositories.length, 7);
+});
+
+test('CLI: GitHub accepts the connection and never answers → a clear message, exit code 1, no hang', { timeout: 20_000 }, async () => {
+  const silent = await silentGitHub();
+  try {
+    for (const link of ['https://github.com/vietage/lang17', 'github.com/vietage']) {
+      const started = Date.now();
+      const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+        const child = spawn(process.execPath, [CLI, 'scan', link], { env: silent.env(1) });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.setEncoding('utf8').on('data', (text) => (stdout += text));
+        child.stderr.setEncoding('utf8').on('data', (text) => (stderr += text));
+        child.on('close', (code) => resolve({ code, stdout, stderr }));
+      });
+      const asked = link.endsWith('lang17') ? 'repos/vietage/lang17' : 'users/vietage';
+      assert.deepEqual(result, { code: 1, stdout: '', stderr: `Cannot reach GitHub: no answer in 1 s for https://api.github.com/${asked}\n` }, link);
+      // It exits, though the connection it gave up on is still held open.
+      assert.ok(Date.now() - started < 8_000, `${link}: ${Date.now() - started} ms`);
+    }
+    assert.ok(silent.connections() >= 2);
+  } finally {
+    silent.close();
+  }
+});
+
+test('CLI: SKILL_ATLAS_GITHUB_TIMEOUT=Infinity, or more than a timer holds → no limit: it waits, no message', { timeout: 20_000 }, async () => {
+  const silent = await silentGitHub();
+  try {
+    for (const seconds of ['Infinity', '3000000']) {
+      const child = spawn(process.execPath, [CLI, 'scan', 'https://github.com/vietage/lang17'], { env: silent.env(seconds) });
+      let output = '';
+      child.stdout.setEncoding('utf8').on('data', (text) => (output += text));
+      child.stderr.setEncoding('utf8').on('data', (text) => (output += text));
+      const exited = new Promise<number | null>((resolve) => child.on('close', resolve));
+      // Still waiting for GitHub after 1.5 s: not given up after 1 ms.
+      const early = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve('waiting'), 1_500))]);
+      child.kill();
+      await exited;
+      assert.equal(early, 'waiting', `${seconds}: ${output}`);
+      assert.equal(output, '', seconds);
+    }
+  } finally {
+    silent.close();
+  }
+});
+
 // An organisation: github.com/skillatlas, answered from the recording in tests/helpers.ts.
 const organisation = await atlas(['scan', 'github.com/skillatlas']);
 
@@ -379,8 +491,10 @@ test('organisation: github.com/<org>, with or without the scheme or a trailing s
   }
 });
 
-test('organisation: its repositories with their skill counts, by count, then by name in any case', () => {
+test('organisation: its repositories with their skill counts, by count, then by name in any case; none with 0 skills', () => {
   assert.equal(organisation.code, 0, organisation.stderr);
+  // Docs, empty (no commit) and huge have 0 skills: not listed, but counted in the header; broken,
+  // not scanned, stays.
   assert.equal(
     organisation.stdout,
     [
@@ -388,12 +502,38 @@ test('organisation: its repositories with their skill counts, by count, then by 
       'alpha — 2 skills',
       'Beta — 2 skills',
       'example-tools — 2 skills',
-      'Docs — 0 skills',
-      'empty — 0 skills',
-      'huge — 0 skills',
       'broken — not scanned',
     ].join('\n'),
   );
+});
+
+test('organisation: repositories with 0 skills not listed; every one with 0 skills → only the header, exit code 0', async () => {
+  // A user whose repositories each have no skill, one of them failing: it alone is listed.
+  const repositories = ['a', 'b', 'c'];
+  const scanEmpty = (failing: string[]) => (input: string) =>
+    scanOrganisation(input, {
+      fetch: async (url) => {
+        if (url.endsWith('/users/quiet')) return Response.json({ login: 'quiet', type: 'User' });
+        if (url.includes('/users/quiet/repos')) {
+          return Response.json(repositories.map((name) => ({ name, full_name: `quiet/${name}`, default_branch: 'main', archived: false, fork: false })));
+        }
+        if (failing.some((name) => url.includes(`/repos/quiet/${name}/`))) throw new Error('connection refused');
+        if (url.includes('/commits/main')) return Response.json({ sha: EXAMPLE_COMMIT });
+        return Response.json({ truncated: false, tree: [{ path: 'README.md', type: 'blob' }] });
+      },
+    });
+  assert.deepEqual(await atlas(['scan', 'github.com/quiet'], { scan: scanEmpty([]) }), {
+    code: 0,
+    stdout: 'quiet · 3 repositories · 0 skills',
+    stderr: '',
+  });
+  assert.deepEqual(await atlas(['scan', 'github.com/quiet'], { scan: scanEmpty(['b']) }), {
+    code: 0,
+    stdout: 'quiet · 3 repositories · 0 skills\nb — not scanned',
+    stderr: 'warning: b: not scanned: Cannot reach GitHub: connection refused',
+  });
+  // The core keeps every repository, with its count: only the output leaves them out.
+  assert.deepEqual((await scanEmpty([])('github.com/quiet')).repositories.map((repository) => repository.skillCount), [0, 0, 0]);
 });
 
 test('organisation: each repository by the same rules as one repository; its warnings start with its name', async () => {
@@ -632,12 +772,38 @@ test('organisation stopped: no repository started after it, the requests under w
   assert.deepEqual(seen, [0, 1, 2]);
   const scanned = [...new Set(urls.flatMap((url) => /\/repos\/SkillAtlas\/([^/]+)/.exec(url)?.[1] ?? []))];
   assert.deepEqual(scanned, ['example-tools', 'Docs']);
-  // Every request with the scan's signal, so a request under way is aborted with it.
-  assert.ok(signals.every((signal) => signal === stop.signal));
+  // Every request with a signal the stop aborts, so a request under way is aborted with it.
+  assert.ok(signals.length && signals.every((signal) => signal?.aborted));
   // Already stopped: nothing is asked for.
   urls.length = 0;
   await assert.rejects(scanOrganisation('github.com/skillatlas', { fetch: (url) => (urls.push(url), github(url)), signal: stop.signal }));
   assert.deepEqual(urls, []);
+});
+
+test('organisation with a stop signal, not stopped: a request GitHub does not answer still gives up after the time limit, and is aborted', async () => {
+  const stop = new AbortController();
+  const aborted: string[] = [];
+  const result = await scanOrganisation('github.com/skillatlas', {
+    // alpha's commit never answers until its request is aborted.
+    fetch: (url, init) => {
+      if (!url.endsWith('/repos/SkillAtlas/alpha/commits/main')) return github(url, init);
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          aborted.push(url);
+          reject(init.signal!.reason);
+        });
+      });
+    },
+    token: 'test',
+    timeout: 200,
+    signal: stop.signal,
+  });
+  assert.ok(
+    result.warnings.includes('alpha: not scanned: Cannot reach GitHub: no answer in 0.2 s for https://api.github.com/repos/SkillAtlas/alpha/commits/main'),
+  );
+  // The request itself aborted by its time limit, not only left behind.
+  assert.deepEqual(aborted, ['https://api.github.com/repos/SkillAtlas/alpha/commits/main']);
+  assert.equal(stop.signal.aborted, false);
 });
 
 test('organisation on a terminal: a progress bar, scanned/total repositories, hidden before the result is printed', async () => {
