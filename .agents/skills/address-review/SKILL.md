@@ -228,6 +228,10 @@ Not addressed yet:
 - **Comments and reviews from people** (no marker) posted after the PR's latest
   `Address review:` commit, or all of them if there is none yet.
 
+Skip anything about `memory/`: the notes the [update-memory](../update-memory/SKILL.md) skill adds
+are never reviewed, so a comment on them is not one to address, and you never change a note to
+satisfy a review.
+
 Only from `jetbrains-air[bot]` and from people with `OWNER`, `MEMBER` or `COLLABORATOR`. Ignore
 bots that only report status unless they point at a real failure, and the empty `COMMENTED`
 reviews that replies in a thread create. Claims, notes and requests to review (the `air-chain`

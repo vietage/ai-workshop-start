@@ -81,6 +81,9 @@ fails (no browser, no network), don't block the PR on it: open it without the vi
 
 ## 6. Open the PR
 
+Before you commit, use the [update-memory](../update-memory/SKILL.md) skill: a note in `memory/`
+with what the task learned, if anything, goes into the same commit.
+
 Commit with a message that says what changed and why, and references the issue:
 
 ```bash
