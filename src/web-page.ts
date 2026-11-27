@@ -331,19 +331,26 @@ function showWarnings() {
 }
 
 /**
- * The organisation's warnings, each repository's as \`<name>: <warning>\`. In a repository's tab, once
- * its own scan is done: its lines are those of that scan, where they were (at the end if it had
- * none), so that a \`not scanned\` line of the organisation's scan goes; the organisation's as they
- * were in its own tab, while the repository's scan is under way, or when it failed.
+ * The organisation's warnings, each repository's as \`<name>: <warning>\`, in the order of its
+ * repositories, then the cache's. In a repository's tab, once its own scan is done: its lines are
+ * those of that scan, where they were (where they would be, in that order, if it had none), so that
+ * a \`not scanned\` line of the organisation's scan goes; the organisation's as they were in its own
+ * tab, while the repository's scan is under way, or when it failed. Whose a line is: by its place,
+ * from each repository's own \`warnings\`, not by its text: a repository named \`cache\` is not the cache.
  */
 function organisationWarnings() {
   if (!active?.result) return organisation.warnings;
-  const prefix = active.name + ': ';
-  const own = active.result.warnings.map((warning) => prefix + warning);
-  const at = organisation.warnings.findIndex((warning) => warning.startsWith(prefix));
-  const others = organisation.warnings.filter((warning) => !warning.startsWith(prefix));
-  if (at === -1) return [...others, ...own];
-  return [...others.slice(0, at), ...own, ...others.slice(at)];
+  const lines = [];
+  let at = 0;
+  for (const entry of organisation.repositories) {
+    const count = entry.warnings.length;
+    lines.push(...(entry.name === active.name
+      ? active.result.warnings.map((warning) => entry.name + ': ' + warning)
+      : organisation.warnings.slice(at, at + count)));
+    at += count;
+  }
+  // The cache's own, after the repositories'.
+  return [...lines, ...organisation.warnings.slice(at)];
 }
 
 /**

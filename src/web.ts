@@ -47,11 +47,20 @@ export async function scanJson(input: string, { open, scanOrganisation }: WebOpt
   return { repository: result.repository, skills, total: result.total, warnings: result.warnings };
 }
 
-/** An organisation: its repositories, each with its commit and its skill count; null for the ones that failed. */
+/**
+ * An organisation: its repositories, each with its commit and its skill count, null for the ones
+ * that failed, and its own warnings, without its name.
+ */
 function organisationJson({ organisation, repositories, skills, warnings }: OrganisationResult) {
   return {
     organisation,
-    repositories: repositories.map(({ name, url, commit, skillCount }) => ({ name, url, commit: commit ?? null, skillCount: skillCount ?? null })),
+    repositories: repositories.map(({ name, url, commit, skillCount, warnings }) => ({
+      name,
+      url,
+      commit: commit ?? null,
+      skillCount: skillCount ?? null,
+      warnings,
+    })),
     skills,
     warnings,
   };

@@ -424,8 +424,12 @@ test('organisation: a repository GitHub does not answer for → not scanned, a w
   });
   // Listed last, with the other one that failed, without a count.
   assert.deepEqual(result.repositories.slice(-2), [
-    { name: 'alpha', url: 'https://github.com/SkillAtlas/alpha' },
-    { name: 'broken', url: 'https://github.com/SkillAtlas/broken' },
+    {
+      name: 'alpha',
+      url: 'https://github.com/SkillAtlas/alpha',
+      warnings: ['not scanned: Cannot reach GitHub: no answer in 0.2 s for https://api.github.com/repos/SkillAtlas/alpha/commits/main'],
+    },
+    { name: 'broken', url: 'https://github.com/SkillAtlas/broken', warnings: ['not scanned: GitHub rate limit reached; try again in a minute'] },
   ]);
   assert.ok(
     result.warnings.includes('alpha: not scanned: Cannot reach GitHub: no answer in 0.2 s for https://api.github.com/repos/SkillAtlas/alpha/commits/main'),
@@ -552,6 +556,7 @@ test('organisation: each repository by the same rules as one repository; its war
     url: 'https://github.com/SkillAtlas/alpha',
     commit: ORGANISATION_COMMIT,
     skillCount: 2,
+    warnings: [],
   });
   for (const { name, skillCount } of result.repositories.filter((repository) => repository.commit)) {
     const alone = await atlas(['scan', `github.com/SkillAtlas/${name}/tree/${ORGANISATION_COMMIT}`]);
@@ -559,9 +564,24 @@ test('organisation: each repository by the same rules as one repository; its war
   }
 });
 
+test('organisation: each repository with its own warnings, without its name; the warnings are theirs, `<name>: `, in the order of the repositories', async () => {
+  const result = await scanRecorded('github.com/skillatlas');
+  const own = (name: string) => result.repositories.find((repository) => repository.name === name)!.warnings;
+  const stderr = organisation.stderr.split('\n');
+  assert.deepEqual(own('example-tools'), [stderr[0].slice('warning: example-tools: '.length)]);
+  assert.deepEqual(own('huge'), [stderr[1].slice('warning: huge: '.length)]);
+  assert.deepEqual(own('broken'), ['not scanned: GitHub rate limit reached; try again in a minute']);
+  assert.deepEqual(own('alpha'), []);
+  assert.deepEqual(own('empty'), []);
+  assert.deepEqual(
+    result.warnings,
+    result.repositories.flatMap((repository) => repository.warnings.map((warning) => `${repository.name}: ${warning}`)),
+  );
+});
+
 test('organisation: a repository that fails → a warning, the scan goes on; it is listed with no count', async () => {
   const result = await scanRecorded('https://github.com/skillatlas/');
-  assert.deepEqual(result.repositories.at(-1), { name: 'broken', url: 'https://github.com/SkillAtlas/broken' });
+  assert.deepEqual(result.repositories.at(-1), { name: 'broken', url: 'https://github.com/SkillAtlas/broken', warnings: ['not scanned: GitHub rate limit reached; try again in a minute'] });
   assert.equal(result.repositories.length, 7);
   assert.equal(result.skills, 6);
   // Unreachable: the same.
@@ -572,7 +592,7 @@ test('organisation: a repository that fails → a warning, the scan goes on; it 
       throw new Error('connection refused');
     },
   });
-  assert.deepEqual(offline.repositories, [{ name: 'a', url: 'https://github.com/SkillAtlas/a' }]);
+  assert.deepEqual(offline.repositories, [{ name: 'a', url: 'https://github.com/SkillAtlas/a', warnings: ['not scanned: Cannot reach GitHub: connection refused'] }]);
   assert.deepEqual(offline.warnings, ['a: not scanned: Cannot reach GitHub: connection refused']);
 });
 
@@ -606,13 +626,17 @@ test('organisation: an answer cut off, one that is not JSON, or an unexpected er
     },
   });
   assert.deepEqual(result.repositories.map((repository) => repository.name), [...names.slice(3), 'cut', 'html', 'odd']);
-  assert.deepEqual(result.repositories.slice(-3), ['cut', 'html', 'odd'].map((name) => ({ name, url: `https://github.com/acme/${name}` })));
   const tree = (name: string) => `https://api.github.com/repos/acme/${name}/git/trees/${EXAMPLE_COMMIT}?recursive=1`;
-  assert.deepEqual(result.warnings, [
-    `cut: not scanned: Cannot read GitHub's answer for ${tree('cut')}: terminated`,
-    `html: not scanned: GitHub answered 200 for ${tree('html')}, but not with JSON`,
-    `odd: not scanned: Unexpected error: Cannot read properties of undefined (reading 'filter')`,
-  ]);
+  const failures: Record<string, string> = {
+    cut: `not scanned: Cannot read GitHub's answer for ${tree('cut')}: terminated`,
+    html: `not scanned: GitHub answered 200 for ${tree('html')}, but not with JSON`,
+    odd: `not scanned: Unexpected error: Cannot read properties of undefined (reading 'filter')`,
+  };
+  assert.deepEqual(
+    result.repositories.slice(-3),
+    ['cut', 'html', 'odd'].map((name) => ({ name, url: `https://github.com/acme/${name}`, warnings: [failures[name]] })),
+  );
+  assert.deepEqual(result.warnings, ['cut', 'html', 'odd'].map((name) => `${name}: ${failures[name]}`));
   // Nothing is still fetching once the scan is done.
   const done = requests;
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -710,6 +734,7 @@ test('organisation: an empty repository, without a commit → 0 skills, no warni
     name: 'empty',
     url: 'https://github.com/SkillAtlas/empty',
     skillCount: 0,
+    warnings: [],
   });
   assert.ok(!result.warnings.some((warning) => warning.startsWith('empty:')));
   // On its own: a clear message, exit code 1.

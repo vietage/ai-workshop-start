@@ -167,7 +167,13 @@ test('cache: a repository with a new commit → scanned again, its entry replace
   const result = await scanner(file, changed.fetch)(ORG);
   assert.deepEqual(changed.trees(), ['SkillAtlas/alpha']);
   assert.equal(changed.files().length, 3);
-  assert.deepEqual(result.repositories[0], { name: 'alpha', url: 'https://github.com/SkillAtlas/alpha', commit: NEW_COMMIT, skillCount: 3 });
+  assert.deepEqual(result.repositories[0], {
+    name: 'alpha',
+    url: 'https://github.com/SkillAtlas/alpha',
+    commit: NEW_COMMIT,
+    skillCount: 3,
+    warnings: [],
+  });
   assert.equal(result.skills, 7);
   assert.deepEqual(entries(file)['SkillAtlas/alpha'], { commit: NEW_COMMIT, count: 3 });
   assert.equal(Object.keys(entries(file)).length, 5);
@@ -184,7 +190,7 @@ test('cache: a repository with a new commit → scanned again, its entry replace
 test('cache: a failed repository is not kept; the next scan tries it again', async (t) => {
   const file = join(directory(t), 'cache.db');
   const first = await scanner(file, github)(ORG);
-  assert.deepEqual(first.repositories.at(-1), { name: 'broken', url: 'https://github.com/SkillAtlas/broken' });
+  assert.deepEqual(first.repositories.at(-1), { name: 'broken', url: 'https://github.com/SkillAtlas/broken', warnings: ['not scanned: GitHub rate limit reached; try again in a minute'] });
   assert.ok(!('SkillAtlas/broken' in entries(file)));
   // Still failing with a warm cache: asked again, the same warning.
   const still = counted();
@@ -200,6 +206,7 @@ test('cache: a failed repository is not kept; the next scan tries it again', asy
     url: 'https://github.com/SkillAtlas/broken',
     commit: ORGANISATION_COMMIT,
     skillCount: 1,
+    warnings: [],
   });
   assert.deepEqual(entries(file)['SkillAtlas/broken'], { commit: ORGANISATION_COMMIT, count: 1 });
 });
@@ -226,7 +233,11 @@ test('cache: a kept repository that GitHub no longer answers for → not scanned
   // As without a token that sees it: the entry is used only after GitHub answered for its commit.
   const hidden = { [`${API}/repos/SkillAtlas/alpha/commits/main`]: { status: 404, body: { message: 'Not Found' } } };
   const result = await scanner(file, replay(hidden, github))(ORG);
-  assert.deepEqual(result.repositories.find((repository) => repository.name === 'alpha'), { name: 'alpha', url: 'https://github.com/SkillAtlas/alpha' });
+  assert.deepEqual(result.repositories.find((repository) => repository.name === 'alpha'), {
+    name: 'alpha',
+    url: 'https://github.com/SkillAtlas/alpha',
+    warnings: ['not scanned: Not found in https://github.com/SkillAtlas/alpha: main'],
+  });
   assert.ok(result.warnings.includes('alpha: not scanned: Not found in https://github.com/SkillAtlas/alpha: main'));
   assert.deepEqual(entries(file)['SkillAtlas/alpha'], { commit: ORGANISATION_COMMIT, count: 2 });
   // It answers again, at the same commit: from the cache.
@@ -243,6 +254,7 @@ test('cache: an empty repository, without a commit → 0 skills each time, not k
       name: 'empty',
       url: 'https://github.com/SkillAtlas/empty',
       skillCount: 0,
+      warnings: [],
     });
     assert.ok(!('SkillAtlas/empty' in entries(file)));
   }
@@ -443,6 +455,9 @@ test('cache: cannot be opened (a directory, a file where its directory should be
       assert.deepEqual(scanned.trees(), KEPT);
       assert.deepEqual({ ...result, warnings: result.warnings.slice(0, -1) }, plain, file);
       assert.match(result.warnings.at(-1)!, /^cache: not used: \S/, file);
+      // The cache's own, after the repositories': none of theirs.
+      const theirs = result.repositories.flatMap((repository) => repository.warnings.map((warning) => `${repository.name}: ${warning}`));
+      assert.deepEqual(theirs, result.warnings.slice(0, -1), file);
     }
   }
   assert.deepEqual(readdirSync(join(root, 'is-a-directory')), []);

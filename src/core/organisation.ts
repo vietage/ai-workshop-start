@@ -10,6 +10,8 @@ export type OrganisationRepository = {
   /** The scanned commit, on the default branch. */
   commit?: string;
   skillCount?: number;
+  /** Its own warnings, without its name: `not scanned: <message>` for one that failed. */
+  warnings: string[];
 };
 
 export type OrganisationResult = {
@@ -18,7 +20,10 @@ export type OrganisationResult = {
   repositories: OrganisationRepository[];
   /** The skills of every repository counted. */
   skills: number;
-  /** Each one starts with its repository's name; the cache's own, last, with `cache: `. */
+  /**
+   * Each repository's, as `<name>: <warning>`, in the order of the repositories; the cache's own,
+   * last, with `cache: `. Whose a line is: by its place, not by its text (a repository can be named `cache`).
+   */
   warnings: string[];
 };
 
@@ -72,7 +77,7 @@ export async function scanOrganisation(input: string, options: OrganisationOptio
   let scanned = 0;
   options.progress?.(0, total);
   const cache = await options.cache?.();
-  let results: Listed[];
+  let results: OrganisationRepository[];
   let cacheWarnings: string[] = [];
   try {
     results = await pool(owner.repositories, options.concurrency ?? 8, async (listed) => {
@@ -84,29 +89,25 @@ export async function scanOrganisation(input: string, options: OrganisationOptio
   } finally {
     cacheWarnings = cache?.close() ?? [];
   }
-  const repositories = sortRepositories(results.map((result) => result.repository));
+  const repositories = sortRepositories(results);
   return {
     organisation: { name: owner.name, url: owner.url },
     repositories,
     skills: repositories.reduce((sum, repository) => sum + (repository.skillCount ?? 0), 0),
     // In the order of the repositories, whatever order the scans ended in; then the cache's own.
     warnings: [
-      ...[...results]
-        .sort((a, b) => repositories.indexOf(a.repository) - repositories.indexOf(b.repository))
-        .flatMap((result) => result.warnings),
+      ...repositories.flatMap((repository) => repository.warnings.map((warning) => `${repository.name}: ${warning}`)),
       ...cacheWarnings.map((warning) => `cache: ${warning}`),
     ],
   };
 }
-
-type Listed = { repository: OrganisationRepository; warnings: string[] };
 
 /**
  * One repository of the organisation, on its default branch; never throws: a failure is a warning.
  * Its commit is always asked for; the rest only when the cache has nothing for that commit. Only a
  * repository scanned to the end is kept: a failed one is tried again by the next scan.
  */
-async function scanListed(listed: ListedRepository, options: OrganisationOptions, cache?: RepositoryCache): Promise<Listed> {
+async function scanListed(listed: ListedRepository, options: OrganisationOptions, cache?: RepositoryCache): Promise<OrganisationRepository> {
   const url = `https://github.com/${listed.id}`;
   try {
     const { commit, source } = await openListed(listed, options);
@@ -117,14 +118,13 @@ async function scanListed(listed: ListedRepository, options: OrganisationOptions
       entry = { commit, skillCount: result.total, warnings: result.warnings };
       cache?.set(listed.id, entry);
     }
-    const warnings = entry.warnings.map((warning) => `${listed.name}: ${warning}`);
-    return { repository: { name: listed.name, url, commit, skillCount: entry.skillCount }, warnings };
+    return { name: listed.name, url, commit, skillCount: entry.skillCount, warnings: entry.warnings };
   } catch (error) {
     // No commit: no files, so no skills.
-    if (error instanceof EmptyRepository) return { repository: { name: listed.name, url, skillCount: 0 }, warnings: [] };
+    if (error instanceof EmptyRepository) return { name: listed.name, url, skillCount: 0, warnings: [] };
     // Whatever the error, the other repositories are still scanned.
     const message = error instanceof AtlasError ? error.message : `Unexpected error: ${describe(error)}`;
-    return { repository: { name: listed.name, url }, warnings: [`${listed.name}: not scanned: ${message}`] };
+    return { name: listed.name, url, warnings: [`not scanned: ${message}`] };
   }
 }
 
